@@ -1,0 +1,254 @@
+:root {
+  --bg-primary: #111a33;
+  --bg-secondary: #182342;
+  --card-bg: rgba(27, 37, 64, 0.92);
+  --card-border: rgba(255, 255, 255, 0.08);
+  --accent: #8c6bff;
+  --accent-soft: rgba(140, 107, 255, 0.25);
+  --text-primary: #f8fbff;
+  --text-muted: #c3cae5;
+  --success: #2ecc71;
+  --danger: #ff6b6b;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: "Space Grotesk", "Inter", sans-serif;
+}
+
+.main {
+  background-color: transparent;
+}
+
+.stApp {
+  background: radial-gradient(circle at top, rgba(140, 107, 255, 0.25), transparent 65%),
+    linear-gradient(135deg, #10162c 0%, #121b35 55%, #0f1426 100%);
+  color: var(--text-primary);
+}
+
+.stApp h1,
+.stApp h2,
+.stApp h3,
+.stApp h4,
+.stApp h5,
+.stApp h6,
+.stApp p,
+.stApp label,
+.stApp span,
+.stApp li {
+  color: var(--text-primary) !important;
+}
+
+.stSidebar {
+  background: linear-gradient(180deg, #151f3c 0%, #10162c 100%) !important;
+  color: var(--text-primary);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.glass-card {
+  background: var(--card-bg);
+  border-radius: 20px;
+  padding: 1.5rem;
+  border: 1px solid var(--card-border);
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(16px);
+  color: var(--text-primary);
+}
+
+.hero-title h1,
+.hero-title p {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.metric-title {
+  font-size: 0.9rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.metric-value {
+  font-size: 2.2rem;
+  font-weight: 600;
+  margin: 0.2rem 0;
+  color: var(--text-primary);
+}
+
+.metric-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.metric-chip.success {
+  background: linear-gradient(120deg, rgba(46, 204, 113, 0.4), rgba(46, 204, 113, 0.2));
+  color: #e9fff2;
+}
+
+.metric-chip.danger {
+  background: linear-gradient(120deg, rgba(255, 107, 107, 0.4), rgba(255, 107, 107, 0.2));
+  color: #fff8f8;
+  border: 1px solid rgba(255, 107, 107, 0.45);
+}
+
+.section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.cta-card {
+  background: linear-gradient(135deg, rgba(127, 93, 255, 0.9), rgba(64, 186, 255, 0.9));
+  color: #fff;
+}
+
+.cta-card h3 {
+  margin: 0;
+  font-size: 1.4rem;
+}
+
+.cta-card p {
+  margin-top: 0.4rem;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.tag-pill {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.18);
+  font-size: 0.85rem;
+  margin-right: 0.4rem;
+  color: #fdfdff;
+}
+
+.glow-divider {
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  margin: 1.5rem 0;
+}
+
+.stDataFrame,
+.stTable {
+  color: var(--text-primary);
+}
+
+/* Slider tweaks */
+div[data-testid="stSlider"] label {
+  color: var(--text-muted) !important;
+  font-weight: 600;
+}
+
+div[data-testid="stSlider"] {
+  padding: 0.5rem 0 1rem 0;
+}
+
+div[data-baseweb="slider"] {
+  background: transparent !important;
+}
+
+div[data-baseweb="slider"] > div {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  height: 6px;
+}
+
+div[data-baseweb="slider"] > div > div {
+  background: linear-gradient(90deg, #6b8bff, #46d6ff);
+  border-radius: 999px;
+}
+
+div[data-baseweb="slider"] [role="slider"] {
+  background: #ffffff;
+  border: 2px solid rgba(255, 255, 255, 0.65);
+  box-shadow: 0 0 0 6px rgba(107, 139, 255, 0.2);
+}
+
+div[data-testid="stSliderValue"] span {
+  color: #ff6b6b !important;
+  font-weight: 700;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.35);
+}
+
+div[data-testid="stSliderMinValue"] span,
+div[data-testid="stSliderMaxValue"] span,
+div[data-testid="stTickBarMin"] span,
+div[data-testid="stTickBarMax"] span {
+  color: var(--text-primary) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  font-weight: 700;
+}
+
+div[data-testid="stSliderMinValue"] > div,
+div[data-testid="stSliderMaxValue"] > div,
+div[data-testid="stTickBarMin"] > div,
+div[data-testid="stTickBarMax"] > div {
+  background: transparent !important;
+  border-radius: 0 !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+}
+
+/* Hide slider tick bar bubbles - CORRECT SELECTORS from DevTools */
+[data-testid="stSliderTickBar"],
+[data-testid="stSliderTickBarMin"],
+[data-testid="stSliderTickBarMax"],
+div[data-testid="stSliderMinValue"],
+div[data-testid="stSliderMaxValue"],
+div[data-testid="stTickBarMin"],
+div[data-testid="stTickBarMax"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  height: 0 !important;
+  width: 0 !important;
+  overflow: hidden !important;
+  position: absolute !important;
+  left: -9999px !important;
+}
+
+[data-testid="stSliderTickBar"] *,
+[data-testid="stSliderTickBarMin"] *,
+[data-testid="stSliderTickBarMax"] *,
+div[data-testid="stSliderMinValue"] *,
+div[data-testid="stSliderMaxValue"] *,
+div[data-testid="stTickBarMin"] *,
+div[data-testid="stTickBarMax"] * {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+.slider-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0.25rem 0 0.5rem 0;
+  padding: 0 0.2rem;
+}
+
+.slider-label {
+  color: rgba(235, 242, 255, 0.85);
+  font-weight: 600;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.slider-label-current {
+  color: #ffb860;
+}
