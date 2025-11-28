@@ -1,0 +1,98 @@
+"""
+Pydantic schemas for API request/response validation
+"""
+
+from pydantic import BaseModel, Field, validator
+
+
+class StockDataPoint(BaseModel):
+    """Single stock data point"""
+
+    time: str = Field(..., description="Date in YYYY-MM-DD format")
+    open: float = Field(..., gt=0, description="Opening price")
+    high: float = Field(..., gt=0, description="Highest price")
+    low: float = Field(..., gt=0, description="Lowest price")
+    close: float = Field(..., gt=0, description="Closing price")
+    volume: float = Field(..., ge=0, description="Trading volume")
+
+    @validator("high")
+    def high_must_be_highest(cls, v, values):
+        if "low" in values and v < values["low"]:
+            raise ValueError("high must be >= low")
+        return v
+
+    @validator("close")
+    def close_in_range(cls, v, values):
+        if "low" in values and "high" in values:
+            if not (values["low"] <= v <= values["high"]):
+                raise ValueError("close must be between low and high")
+        return v
+
+
+class SinglePredictRequest(BaseModel):
+    """Request for single step prediction"""
+
+    historical_data: list[StockDataPoint] = Field(
+        ..., min_items=20, description="Historical stock data (minimum 20 days required)"
+    )
+
+
+class SinglePredictResponse(BaseModel):
+    """Response for single step prediction"""
+
+    predicted_price: float = Field(..., description="Predicted next day closing price")
+    predicted_return: float = Field(..., description="Predicted next day log return")
+    forecast_date: str = Field(..., description="Date of prediction (YYYY-MM-DD)")
+
+
+class MultiPredictRequest(BaseModel):
+    """Request for multi-step prediction"""
+
+    historical_data: list[StockDataPoint] = Field(
+        ..., min_items=20, description="Historical stock data (minimum 20 days required)"
+    )
+    n_steps: int = Field(
+        default=100, ge=1, le=100, description="Number of days to forecast (1-100)"
+    )
+
+
+class MultiPredictResponse(BaseModel):
+    """Response for multi-step prediction"""
+
+    predictions: list[dict] = Field(
+        ..., description="List of predictions with date, price, and return"
+    )
+    n_steps: int = Field(..., description="Number of forecasted days")
+
+
+class FullPredictRequest(BaseModel):
+    """Request for full 100-day prediction"""
+
+    historical_data: list[StockDataPoint] = Field(
+        ..., min_items=20, description="Historical stock data (minimum 20 days required)"
+    )
+
+
+class FullPredictResponse(BaseModel):
+    """Response for full 100-day prediction"""
+
+    predictions: list[dict] = Field(
+        ..., description="List of 100 predictions with date, price, and return"
+    )
+
+
+class ModelInfoResponse(BaseModel):
+    """Response for model information"""
+
+    status: str
+    model_type: str | None = None
+    features_count: int | None = None
+    config: dict | None = None
+
+
+class HealthResponse(BaseModel):
+    """Health check response"""
+
+    status: str
+    message: str
+    models_loaded: bool
