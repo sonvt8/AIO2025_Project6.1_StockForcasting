@@ -22,3 +22,6 @@ pre-commit==3.8.0
 # Frontend
 streamlit==1.39.0
 plotly==5.24.1
+
+# Stock data fetching
+vnstock==0.2.7  # Function-based API (stock_historical_data)

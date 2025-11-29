@@ -12,9 +12,12 @@ from app.api.schemas import (
     ModelInfoResponse,
     MultiPredictRequest,
     MultiPredictResponse,
+    RealtimePredictRequest,
+    RealtimePredictResponse,
     SinglePredictRequest,
     SinglePredictResponse,
 )
+from app.services.data_fetcher import fetch_fpt_data_as_dict_list
 from app.services.model_service import ModelService
 from app.utils.data_processing import load_data, prepare_historical_data_for_prediction
 
@@ -190,6 +193,91 @@ async def predict_full(request: FullPredictRequest):
 
         return FullPredictResponse(predictions=predictions)
 
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid input: {str(e)}"
+        ) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Prediction error: {str(e)}"
+        ) from e
+
+
+@router.post("/api/v1/predict/realtime", response_model=RealtimePredictResponse)
+async def predict_realtime(request: RealtimePredictRequest):
+    """
+    Predict using real-time data fetched from internet
+
+    Automatically fetches FPT stock data from internet and predicts future prices.
+    This endpoint replaces the need to manually provide historical_data.
+    """
+    try:
+        model_service = get_model_service()
+        model_service.ensure_models_loaded()
+
+        # Fetch data from internet (only missing data will be fetched)
+        try:
+            historical_data, metadata = fetch_fpt_data_as_dict_list(days=request.historical_days)
+        except ImportError as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    f"Data fetcher not available: {str(e)}. "
+                    "Please install vnstock: pip install vnstock"
+                ),
+            ) from e
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Error fetching data from internet: {str(e)}",
+            ) from e
+
+        if len(historical_data) < 20:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Not enough data fetched. "
+                    f"Got {len(historical_data)} days, need at least 20 days."
+                ),
+            )
+
+        # Get latest date from metadata or data
+        latest_date = metadata.get("last_date") or historical_data[-1]["time"]
+
+        # Load training data for proper feature engineering
+        try:
+            train_df = load_data()
+        except Exception:
+            train_df = None
+
+        # Predict multi-step
+        results = model_service.forecast_service.predict_from_historical_data(
+            historical_data, request.n_steps, train_df
+        )
+
+        # Format predictions
+        predictions = [
+            {
+                "date": pd.Timestamp(date).strftime("%Y-%m-%d"),
+                "price": round(float(price), 2),
+                "return": round(float(ret), 6),
+            }
+            for date, price, ret in zip(
+                results["dates"], results["prices"], results["returns"], strict=False
+            )
+        ]
+
+        return RealtimePredictResponse(
+            fetched_data_count=len(historical_data),
+            latest_date=latest_date,
+            fetched_new_data=metadata.get("fetched_new_data", False),
+            previous_last_date=metadata.get("previous_last_date"),
+            predictions=predictions,
+            n_steps=len(predictions),
+        )
+
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid input: {str(e)}"

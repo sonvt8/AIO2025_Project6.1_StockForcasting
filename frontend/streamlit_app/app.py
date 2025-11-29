@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import requests
 import streamlit as st
 from components import render_metric_card
 from streamlit.components.v1 import html
@@ -12,6 +13,9 @@ from streamlit.components.v1 import html
 BASE_DIR = Path(__file__).parent
 CSS_PATH = BASE_DIR / "assets" / "css" / "theme.css"
 JS_PATH = BASE_DIR / "assets" / "js" / "animations.js"
+
+# API Configuration
+API_BASE_URL = "http://localhost:8000"  # Change this if your API runs on different port
 
 
 def load_static_assets() -> None:
@@ -143,19 +147,47 @@ def render_forecast_table(forecast: pd.DataFrame) -> None:
     )
 
 
+def fetch_realtime_prediction(
+    api_url: str, n_steps: int = 100, historical_days: int = 120
+) -> dict | None:
+    """
+    Fetch realtime prediction from API
+
+    Args:
+        api_url: Base URL of the API
+        n_steps: Number of days to forecast
+        historical_days: Number of historical days to fetch
+
+    Returns:
+        Response dict or None if error
+    """
+    try:
+        response = requests.post(
+            f"{api_url}/api/v1/predict/realtime",
+            json={"n_steps": n_steps, "historical_days": historical_days},
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error calling API: {str(e)}")
+        return None
+
+
 def render_cta() -> None:
     cta_description = (
-        "Swap the dummy data with live predictions from the FastAPI backend "
-        "and unlock automated monitoring."
+        "Use the sidebar to fetch real-time data from internet and get live predictions. "
+        "The system automatically fetches FPT stock data and uses the trained model "
+        "to forecast future prices."
     )
     html_content = (
         '<div class="glass-card cta-card">'
-        "<h3>Ready to connect the real-time API?</h3>"
+        "<h3>Realtime Prediction Available</h3>"
         f"<p>{cta_description}</p>"
         "<ul>"
-        "<li>POST /api/v1/predict/single</li>"
-        "<li>POST /api/v1/predict/multi</li>"
-        "<li>POST /api/v1/predict/full</li>"
+        "<li>POST /api/v1/predict/realtime - Fetch data from internet and predict</li>"
+        "<li>POST /api/v1/predict/multi - Predict with custom data</li>"
+        "<li>POST /api/v1/predict/full - Full 100-day prediction</li>"
         "</ul>"
         "</div>"
     )
@@ -171,7 +203,16 @@ def main() -> None:
     load_static_assets()
 
     # Sidebar controls
-    st.sidebar.title("Prototype Controls")
+    st.sidebar.title("Prediction Controls")
+
+    # Data source selection
+    use_realtime = st.sidebar.checkbox("Use Realtime Data from Internet", value=False)
+
+    if use_realtime:
+        st.sidebar.subheader("API Configuration")
+        api_url = st.sidebar.text_input("API URL", value=API_BASE_URL)
+        historical_days = st.sidebar.slider("Historical Days to Fetch", 20, 365, 120, step=10)
+
     horizon = st.sidebar.slider("Forecast horizon (business days)", 30, 100, 60, step=10)
     st.sidebar.markdown(
         f"""
@@ -183,17 +224,90 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
-    st.sidebar.caption("Baseline parameters are fixed to preserve Kaggle MSE results.")
+
+    if not use_realtime:
+        st.sidebar.caption("Baseline parameters are fixed to preserve Kaggle MSE results.")
+        st.sidebar.info("💡 Enable 'Use Realtime Data' to fetch live FPT stock data from internet")
 
     render_header()
 
-    metrics = get_dummy_metrics()
-    render_metrics(metrics)
+    # Fetch realtime data or use dummy data
+    if use_realtime:
+        st.info("🔄 Fetching realtime data from internet...")
+        with st.spinner("Fetching FPT stock data and generating predictions..."):
+            result = fetch_realtime_prediction(
+                api_url, n_steps=horizon, historical_days=historical_days
+            )
 
-    history = get_dummy_history()
-    forecast = get_dummy_forecast(horizon)
-    render_price_section(history, forecast)
-    render_forecast_table(forecast)
+        if result:
+            # Show fetch status
+            if result.get("fetched_new_data", False):
+                st.success(
+                    "✅ Fetched new data from internet! "
+                    f"Total: {result['fetched_data_count']} days. "
+                    f"Latest date: {result['latest_date']}"
+                )
+                if result.get("previous_last_date"):
+                    st.info(f"📊 Previous last date in dataset: {result['previous_last_date']}")
+            else:
+                st.info(
+                    "ℹ️ Using existing dataset (no new data needed). "
+                    f"Total: {result['fetched_data_count']} days. "
+                    f"Latest date: {result['latest_date']}"
+                )
+
+            # Convert predictions to DataFrame
+            predictions_df = pd.DataFrame(result["predictions"])
+            predictions_df["date"] = pd.to_datetime(predictions_df["date"])
+
+            # Calculate metrics from real data
+            latest_price = predictions_df.iloc[0]["price"] if len(predictions_df) > 0 else 0
+            avg_return = predictions_df["return"].mean() * 100 if len(predictions_df) > 0 else 0
+
+            metrics = [
+                ("Latest Close", f"₫{latest_price:.2f}K", 0),
+                ("Avg Projected Return", f"{avg_return:.2f}%", 0),
+                ("Forecast Days", f"{result['n_steps']}d", 0),
+            ]
+            render_metrics(metrics)
+
+            # For history, we'll show a simple trend
+            # (in real app, you may want to fetch full historical data)
+            history_dates = pd.date_range(
+                end=pd.Timestamp(result["latest_date"]),
+                periods=min(120, result["fetched_data_count"]),
+                freq="B",
+            )
+            history = pd.DataFrame(
+                {
+                    "date": history_dates,
+                    "close": [latest_price]
+                    * len(history_dates),  # Placeholder - in real app, fetch full history
+                }
+            )
+
+            forecast = predictions_df.rename(
+                columns={"price": "forecast_price", "return": "expected_return"}
+            )
+            render_price_section(history, forecast)
+            render_forecast_table(forecast)
+        else:
+            st.error("Failed to fetch realtime data. Showing dummy data instead.")
+            metrics = get_dummy_metrics()
+            render_metrics(metrics)
+            history = get_dummy_history()
+            forecast = get_dummy_forecast(horizon)
+            render_price_section(history, forecast)
+            render_forecast_table(forecast)
+    else:
+        # Use dummy data
+        metrics = get_dummy_metrics()
+        render_metrics(metrics)
+        history = get_dummy_history()
+        forecast = get_dummy_forecast(horizon)
+        render_price_section(history, forecast)
+        render_forecast_table(forecast)
+
     render_cta()
 
 

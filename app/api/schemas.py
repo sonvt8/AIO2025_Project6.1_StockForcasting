@@ -96,3 +96,34 @@ class HealthResponse(BaseModel):
     status: str
     message: str
     models_loaded: bool
+
+
+class RealtimePredictRequest(BaseModel):
+    """Request for realtime prediction (fetches data from internet)"""
+
+    n_steps: int = Field(
+        default=100, ge=1, le=100, description="Number of days to forecast (1-100)"
+    )
+    historical_days: int = Field(
+        default=120,
+        ge=20,
+        le=365,
+        description="Number of historical days to fetch from internet (20-365)",
+    )
+
+
+class RealtimePredictResponse(BaseModel):
+    """Response for realtime prediction"""
+
+    fetched_data_count: int = Field(..., description="Number of historical data points (total)")
+    latest_date: str = Field(..., description="Latest date in data (YYYY-MM-DD)")
+    fetched_new_data: bool = Field(
+        ..., description="Whether new data was fetched from internet (False if using cached data)"
+    )
+    previous_last_date: str | None = Field(
+        None, description="Last date in dataset before fetch (if available)"
+    )
+    predictions: list[dict] = Field(
+        ..., description="List of predictions with date, price, and return"
+    )
+    n_steps: int = Field(..., description="Number of forecasted days")
