@@ -267,6 +267,39 @@ async def predict_realtime(request: RealtimePredictRequest):
             )
         ]
 
+        # Prepare historical data for chart: ALL data (FPT_train.csv + newly fetched)
+        # historical_data already contains merged data from fetch_fpt_data_as_dict_list()
+        # which includes ALL data from FPT_train.csv (from 2020-08-03) + newly fetched data
+
+        # Sort by time to ensure chronological order
+        historical_sorted = sorted(historical_data, key=lambda x: x["time"])
+
+        # Debug: log full data range before processing
+        if len(historical_sorted) > 0:
+            first_date_full = pd.Timestamp(historical_sorted[0]["time"])
+            last_date_full = pd.Timestamp(historical_sorted[-1]["time"])
+            print(
+                f"[DEBUG] Full historical data received: {len(historical_sorted)} records "
+                f"from {first_date_full.date()} to {last_date_full.date()}"
+            )
+
+        # Last day is excluded because forecast starts from the next day
+        # This ensures the chart shows historical data up to (but not including)
+        # the forecast start date
+        historical_for_chart = (
+            historical_sorted[:-1] if len(historical_sorted) > 1 else historical_sorted
+        )
+
+        # Debug: log data range after processing
+        if len(historical_for_chart) > 0:
+            first_date = pd.Timestamp(historical_for_chart[0]["time"])
+            last_date_chart = pd.Timestamp(historical_for_chart[-1]["time"])
+            print(
+                f"[DEBUG] Historical data for chart: {len(historical_for_chart)} records "
+                f"from {first_date.date()} to {last_date_chart.date()} "
+                f"(excluded last day: {last_date_full.date()})"
+            )
+
         return RealtimePredictResponse(
             fetched_data_count=len(historical_data),
             latest_date=latest_date,
@@ -274,6 +307,7 @@ async def predict_realtime(request: RealtimePredictRequest):
             previous_last_date=metadata.get("previous_last_date"),
             predictions=predictions,
             n_steps=len(predictions),
+            historical_data=historical_for_chart,
         )
 
     except HTTPException:

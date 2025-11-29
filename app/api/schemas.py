@@ -127,3 +127,13 @@ class RealtimePredictResponse(BaseModel):
         ..., description="List of predictions with date, price, and return"
     )
     n_steps: int = Field(..., description="Number of forecasted days")
+    historical_data: list[dict] = Field(
+        ...,
+        description=(
+            "Historical OHLCV data for chart display. "
+            "Contains 6 years of historical data from latest_date going backwards, "
+            "excluding the last day (forecast starts from next day). "
+            "This includes ALL data from FPT_train.csv + newly fetched data, merged together. "
+            "Approximately ~1500 trading days for better chart depth and clarity."
+        ),
+    )
