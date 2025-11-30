@@ -1,5 +1,6 @@
 """Interactive Streamlit UI for the FPT Stock Forecasting project."""
 
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -16,12 +17,71 @@ st.set_page_config(
     layout="wide",
 )
 
-BASE_DIR = Path(__file__).parent
-CSS_PATH = BASE_DIR / "assets" / "css" / "theme.css"
-JS_PATH = BASE_DIR / "assets" / "js" / "animations.js"
+BASE_DIR = Path(__file__).parent.parent.parent  # Go up to project root
+CSS_PATH = BASE_DIR / "frontend" / "streamlit_app" / "assets" / "css" / "theme.css"
+JS_PATH = BASE_DIR / "frontend" / "streamlit_app" / "assets" / "js" / "animations.js"
+DATA_RAW_DIR = BASE_DIR / "data" / "raw"
 
 # API Configuration
 API_BASE_URL = "http://localhost:8000"  # Change this if your API runs on different port
+
+
+def check_dataset_exists() -> Path | None:
+    """
+    Check if dataset file exists in data/raw/ directory.
+
+    Returns:
+        Path to dataset file if found (contains 'train' in filename), None otherwise
+    """
+    if not DATA_RAW_DIR.exists():
+        return None
+
+    csv_files = list(DATA_RAW_DIR.glob("*.csv"))
+    train_files = [f for f in csv_files if "train" in f.name.lower()]
+
+    if train_files:
+        return train_files[0]
+    return None
+
+
+def save_uploaded_dataset(uploaded_file, filename: str | None = None) -> Path | None:
+    """
+    Save uploaded CSV file to data/raw/ directory with 'train' + date in filename.
+
+    Args:
+        uploaded_file: Streamlit uploaded file object
+        filename: Optional custom filename (if None, uses train_YYYYMMDD.csv format)
+
+    Returns:
+        Path to saved file if successful, None otherwise
+    """
+    try:
+        # Ensure data/raw directory exists
+        DATA_RAW_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Generate filename with 'train' + date
+        if filename is None:
+            date_str = datetime.now().strftime("%Y%m%d")
+            filename = f"train_{date_str}.csv"
+
+        # Ensure filename contains 'train'
+        if "train" not in filename.lower():
+            date_str = datetime.now().strftime("%Y%m%d")
+            base_name = Path(filename).stem
+            filename = f"train_{base_name}_{date_str}.csv"
+
+        # Full path
+        save_path = DATA_RAW_DIR / filename
+
+        # Save file
+        with open(save_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+
+        st.success(f"✅ Dataset saved to: {save_path}")
+        return save_path
+    except Exception as e:
+        st.error(f"❌ Error saving dataset: {e}")
+        return None
 
 
 def load_static_assets() -> None:
@@ -31,6 +91,7 @@ def load_static_assets() -> None:
     if JS_PATH.exists():
         html(f"<script>{JS_PATH.read_text()}</script>", height=0)
     # Ensure buttons (e.g. 'Run prediction') are clearly visible
+    # Fix header/footer z-index to not cover Streamlit controls
     st.markdown(
         """
         <style>
@@ -46,6 +107,37 @@ def load_static_assets() -> None:
             background-color: #fb923c;
             color: #0f172a;
         }
+
+        /* Simple: Just ensure glass-card doesn't interfere with Streamlit header */
+        .glass-card {
+            position: relative !important;
+            z-index: 1 !important;
+            margin-top: 1.5rem !important;
+            margin-bottom: 1.5rem !important;
+        }
+
+        /* Footer styling - fixed at bottom */
+        .app-footer {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--card-bg);
+            border-top: 1px solid var(--card-border);
+            padding: 0.75rem 1.5rem;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            letter-spacing: 0.1em;
+            z-index: 100;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 -5px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Add padding to main content to prevent footer overlap */
+        .main .block-container {
+            padding-bottom: 4rem !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -57,6 +149,8 @@ def render_header() -> None:
         "Monitor market momentum, preview smart forecasts, "
         "and prepare trading plans – all from a single modern console."
     )
+    # CSS already handles spacing, but adding minimal spacing for safety
+    st.markdown("<div style='margin-top: 0.5rem;'></div>", unsafe_allow_html=True)
     html_content = (
         '<div class="glass-card">'
         '<div class="hero-title">'
@@ -72,6 +166,12 @@ def render_header() -> None:
         "</div>"
     )
     st.markdown(html_content, unsafe_allow_html=True)
+
+
+def render_footer() -> None:
+    """Render fixed footer at the bottom of the page."""
+    footer_html = '<div class="app-footer">CONQ999-AIO2025</div>'
+    st.markdown(footer_html, unsafe_allow_html=True)
 
 
 def render_metrics(metrics: list[tuple[str, str, float]]) -> None:
@@ -207,15 +307,47 @@ def render_price_section(history: pd.DataFrame, forecast: pd.DataFrame) -> None:
             )
         )
 
-    # Add forecast line
+    # Add forecast line with dashed style to distinguish from historical
     if len(forecast_clean) > 0:
+        # Find the transition point (last historical date)
+        if len(history_clean) > 0:
+            last_historical_date = history_clean["date"].max()
+
+            # Add vertical line at transition point using add_shape (more compatible)
+
+            fig.add_shape(
+                type="line",
+                x0=last_historical_date,
+                x1=last_historical_date,
+                y0=0,
+                y1=1,
+                yref="paper",  # Use paper coordinates (0-1) for full height
+                line=dict(
+                    color="rgba(255,255,255,0.3)",
+                    width=1,
+                    dash="dot",
+                ),
+            )
+
+            # Add annotation for the transition point
+            fig.add_annotation(
+                x=last_historical_date,
+                y=1,
+                yref="paper",
+                text="Forecast starts",
+                showarrow=False,
+                font=dict(size=10, color="rgba(255,255,255,0.7)"),
+                xanchor="left",
+                yanchor="bottom",
+            )
+
         fig.add_trace(
             go.Scatter(
                 x=forecast_clean["date"],
                 y=forecast_clean["price"],
                 mode="lines",
                 name="Forecast",
-                line=dict(color="#45d0ff", width=2),
+                line=dict(color="#45d0ff", width=2),  # Solid line (no dash)
                 hovertemplate=(
                     "<b>Forecast</b><br>Date: %{x|%Y-%m-%d}<br>" "Price: %{y:.2f}<extra></extra>"
                 ),
@@ -349,17 +481,38 @@ def render_forecast_table(forecast: pd.DataFrame) -> None:
 def fetch_realtime_prediction(
     api_url: str, n_steps: int = 100, historical_days: int = 120
 ) -> dict | None:
-    """Fetch realtime prediction from API."""
+    """
+    Fetch realtime prediction from API.
+
+    Note: The 'historical_days' parameter is for backward compatibility only.
+    When an existing dataset (FPT_train.csv) is present, the API ALWAYS returns
+    ALL data from the dataset (from 2020-08-03) + newly fetched data, regardless
+    of the 'historical_days' value. The parameter only affects behavior when no
+    existing dataset exists.
+    """
     try:
+        print(f"[DEBUG] Sending request: n_steps={n_steps}, historical_days={historical_days}")
         response = requests.post(
             f"{api_url}/api/v1/predict/realtime",
             json={"n_steps": n_steps, "historical_days": historical_days},
-            timeout=30,
+            timeout=60,  # Increased timeout for large datasets
         )
         response.raise_for_status()
         return response.json()
+    except requests.exceptions.HTTPError as e:
+        # Try to get error details from response
+        error_detail = "Unknown error"
+        try:
+            error_response = e.response.json()
+            error_detail = error_response.get("detail", str(e))
+        except Exception:
+            error_detail = str(e)
+        st.error(f"Error calling API: {error_detail}")
+        print(f"[ERROR] API error: {e.response.status_code} - {error_detail}")
+        return None
     except requests.exceptions.RequestException as e:
         st.error(f"Error calling API: {str(e)}")
+        print(f"[ERROR] Request exception: {e}")
         return None
 
 
@@ -531,43 +684,133 @@ def main() -> None:
 
     st.sidebar.title("Prediction Controls")
     api_url = st.sidebar.text_input("API Base URL", value=API_BASE_URL)
+
     mode = st.sidebar.radio(
         "Prediction mode",
         ("Realtime API", "Upload CSV → API"),
-        index=0,
+        index=1,  # Default to "Upload CSV → API"
     )
     horizon = st.sidebar.slider("Forecast horizon (business days)", 30, 100, 60, step=10)
 
+    # Initialize variables for Realtime API mode
+    proceed_with_fetch = False
+    has_dataset = False
+    realtime_days = 120  # Default value
+    upload_choice = None
+    uploaded_file_realtime = None
+
     if mode == "Realtime API":
-        realtime_days = st.sidebar.slider("Historical days (realtime fetch)", 20, 365, 120, step=10)
+        # Check if dataset exists in data/raw/ (file with 'train' in name)
+        dataset_file = check_dataset_exists()
+        has_dataset = dataset_file is not None
+
+        if has_dataset:
+            st.sidebar.success(f"✅ Dataset found: {dataset_file.name}")
+            realtime_days = st.sidebar.slider(
+                "Historical days (realtime fetch)",
+                20,
+                365,
+                120,
+                step=10,
+                help=(
+                    "Note: When a dataset file exists, the system will use ALL data "
+                    "from that file + newly fetched data, regardless of this slider value."
+                ),
+            )
+            # User can proceed with fetching
+            proceed_with_fetch = True
+            upload_choice = None
+            uploaded_file_realtime = None
+        else:
+            # No dataset found - show message box for user to choose
+            st.sidebar.warning("⚠️ No dataset found in data/raw/ (file with 'train' in name).")
+
+            # Message box for user choice
+            st.sidebar.info(
+                "📋 Please choose how to proceed:\n\n"
+                "1. Upload a CSV file to use as dataset\n"
+                "2. Use slider to fetch data from internet"
+            )
+
+            # User choice: Upload file or use slider
+            upload_choice = st.sidebar.radio(
+                "Choose option:",
+                ("Upload CSV file", "Fetch from internet (use slider)"),
+                index=None,  # No default selection
+                key="realtime_choice",
+            )
+
+            if upload_choice == "Upload CSV file":
+                uploaded_file_realtime = st.sidebar.file_uploader(
+                    "Upload CSV file", type=["csv"], key="realtime_upload"
+                )
+                if uploaded_file_realtime is not None:
+                    # Save uploaded file as dataset
+                    if st.sidebar.button("💾 Save as Dataset and Proceed"):
+                        saved_path = save_uploaded_dataset(uploaded_file_realtime)
+                        if saved_path:
+                            st.sidebar.success(f"✅ Saved to: {saved_path.name}")
+                            # Refresh to detect new dataset
+                            st.rerun()
+                    proceed_with_fetch = False
+                else:
+                    proceed_with_fetch = False
+            elif upload_choice == "Fetch from internet (use slider)":
+                realtime_days = st.sidebar.slider(
+                    "Historical days (realtime fetch)",
+                    20,
+                    365,
+                    120,
+                    step=10,
+                    help="Number of days to fetch from internet when no dataset exists.",
+                )
+                proceed_with_fetch = True
+                uploaded_file_realtime = None
+            else:
+                # No choice made yet
+                proceed_with_fetch = False
+                uploaded_file_realtime = None
+
     elif mode == "Upload CSV → API":
+        # Upload mode - no dataset checking needed
         uploaded_file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
         st.sidebar.caption("CSV mode uses multi-step prediction based on the slider above.")
         run_prediction = st.sidebar.button(f"Run prediction ({horizon} days)")
+
     render_header()
 
     if mode == "Realtime API":
-        st.info("🔄 Fetching realtime data from FastAPI ...")
-        with st.spinner("Calling /api/v1/predict/realtime"):
+        # Only proceed if user has made a choice (has dataset OR chose option)
+        if not proceed_with_fetch:
+            if not has_dataset:
+                st.info(
+                    "👆 Please choose an option in the sidebar: "
+                    "upload a CSV file or use slider to fetch from internet."
+                )
+            return
+
+        # Show fetching message only during the API call
+        with st.spinner("🔄 Fetching realtime data from FastAPI ..."):
             result = fetch_realtime_prediction(
                 api_url, n_steps=horizon, historical_days=realtime_days
             )
 
         if result and result.get("predictions"):
+            # Show success message after fetching completes
             if result.get("fetched_new_data", False):
                 st.success(
                     "✅ Fetched new data from internet! "
                     f"Total: {result['fetched_data_count']} days. "
                     f"Latest date: {result['latest_date']}"
                 )
-                if result.get("previous_last_date"):
-                    st.info(f"📊 Previous last date: {result['previous_last_date']}")
             else:
                 st.info(
                     "ℹ️ Using cached dataset. "
                     f"Total: {result['fetched_data_count']} days. "
                     f"Latest date: {result['latest_date']}"
                 )
+
+            # Group debug information in an expander (will be populated after data cleaning)
 
             predictions_df = pd.DataFrame(result["predictions"])
             predictions_df["date"] = pd.to_datetime(predictions_df["date"])
@@ -585,15 +828,6 @@ def main() -> None:
                 history_df["time"] = pd.to_datetime(history_df["time"])
                 history_df = history_df.sort_values("time").reset_index(drop=True)
 
-                # Debug: log data range received from API
-                if len(history_df) > 0:
-                    first_date = history_df["time"].min()
-                    last_date = history_df["time"].max()
-                    st.info(
-                        f"📊 Received {len(history_df)} historical records "
-                        f"from {first_date.date()} to {last_date.date()}"
-                    )
-
                 # Ensure we have 'close' column
                 if "close" not in history_df.columns:
                     if "price" in history_df.columns:
@@ -607,10 +841,18 @@ def main() -> None:
                 history_df = history_df[history_df["close"] > 0]
                 history_df = history_df.sort_values("time").reset_index(drop=True)
 
-                # Debug: log cleaned data range
+                # Add cleaned data info to expander
                 if len(history_df) > 0:
                     first_date_clean = history_df["time"].min()
                     last_date_clean = history_df["time"].max()
+                    # Create expander with all debug information
+                    with st.expander("📊 Data Details", expanded=False):
+                        if result.get("previous_last_date"):
+                            st.caption(f"Previous last date: {result['previous_last_date']}")
+                        st.caption(
+                            f"Received {len(history_df)} historical records "
+                            f"from {first_date_clean.date()} to {last_date_clean.date()}"
+                        )
                     print(
                         f"[DEBUG] Cleaned historical data: {len(history_df)} records "
                         f"from {first_date_clean.date()} to {last_date_clean.date()}"
@@ -661,6 +903,9 @@ def main() -> None:
             st.caption("Select a CSV file and click 'Run prediction' to call the API.")
 
     render_cta()
+
+    # Render fixed footer
+    render_footer()
 
 
 if __name__ == "__main__":

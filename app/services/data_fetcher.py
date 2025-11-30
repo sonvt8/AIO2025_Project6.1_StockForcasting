@@ -6,7 +6,7 @@ Only fetches missing data from the last date in training dataset
 
 import pandas as pd
 
-from app.config import DATA_FILE
+from app.config import find_dataset_file
 
 try:
     from vnstock import stock_historical_data
@@ -21,11 +21,13 @@ def get_last_date_from_dataset() -> pd.Timestamp | None:
     Returns:
         Last date in dataset or None if dataset doesn't exist
     """
-    if not DATA_FILE.exists():
+    # Use flexible file finding
+    dataset_file = find_dataset_file()
+    if dataset_file is None or not dataset_file.exists():
         return None
 
     try:
-        df = pd.read_csv(DATA_FILE)
+        df = pd.read_csv(dataset_file)
         df["time"] = pd.to_datetime(df["time"])
         last_date = df["time"].max()
         return pd.Timestamp(last_date)
@@ -145,6 +147,71 @@ def fetch_new_data_only(start_date: pd.Timestamp, end_date: pd.Timestamp) -> pd.
         # Remove duplicates
         df = df.drop_duplicates(subset=["time"]).reset_index(drop=True)
 
+        # Validate and normalize price data to match training data format
+        # Training data (FPT_train.csv) uses thousands VND (e.g., 19.07 = 19070 VND)
+        # If fetched data is in VND (e.g., 96100 VND), convert to thousands VND (96.10)
+        price_cols = ["open", "high", "low", "close"]
+
+        # Check if any price column has values > 1000 (likely in VND, not thousands VND)
+        # FPT stock in training data ranges from ~19 to ~132 (thousands VND)
+        needs_normalization = False
+        max_price = 0
+
+        for col in price_cols:
+            if col in df.columns:
+                col_max = df[col].max()
+                if col_max > max_price:
+                    max_price = col_max
+                # If any price > 1000, likely in VND (need to convert to thousands VND)
+                if col_max > 1000:
+                    needs_normalization = True
+                    break
+
+        # Normalize all price columns together to maintain consistency
+        if needs_normalization:
+            print(
+                f"[INFO] Detected prices in VND format (max: {max_price:.2f}). "
+                "Converting all price columns to thousands VND (dividing by 1000) "
+                "to match training data format."
+            )
+            for col in price_cols:
+                if col in df.columns:
+                    df[col] = df[col] / 1000.0
+
+        # Filter out extreme outliers after normalization
+        # FPT stock typically ranges from ~19 to ~132 (thousands VND)
+        # Allow range 1-500 to account for potential future growth
+        valid_mask = pd.Series([True] * len(df), index=df.index)
+
+        for col in price_cols:
+            if col in df.columns:
+                col_mask = (df[col] >= 1) & (df[col] <= 500)
+                valid_mask = valid_mask & col_mask
+
+        if valid_mask.sum() < len(df):
+            filtered_count = len(df) - valid_mask.sum()
+            print(
+                f"[WARNING] Filtered out {filtered_count} rows "
+                f"with invalid prices (outside range 1-500 thousands VND). "
+                f"Remaining: {valid_mask.sum()} rows."
+            )
+            df = df[valid_mask].reset_index(drop=True)
+
+        # Validate OHLC relationships
+        invalid_rows = (
+            (df["high"] < df["low"])
+            | (df["close"] < df["low"])
+            | (df["close"] > df["high"])
+            | (df["open"] < df["low"])
+            | (df["open"] > df["high"])
+        )
+        if invalid_rows.any():
+            print(
+                f"[WARNING] Found {invalid_rows.sum()} rows with invalid OHLC relationships. "
+                "Removing them."
+            )
+            df = df[~invalid_rows].reset_index(drop=True)
+
         return df
 
     except Exception as e:
@@ -172,13 +239,16 @@ def fetch_fpt_data(days: int = 120) -> pd.DataFrame:
         Format matches FPT_train.csv structure
         Contains ALL data from FPT_train.csv (from 2020-08-03) + newly fetched data
     """
-    # Load existing dataset (FPT_train.csv)
+    # Load existing dataset (using flexible file finding)
     existing_df = None
     last_date = None
 
-    if DATA_FILE.exists():
+    # Try to find dataset file (supports renamed files and multiple CSVs)
+    dataset_file = find_dataset_file()
+
+    if dataset_file is not None and dataset_file.exists():
         try:
-            existing_df = pd.read_csv(DATA_FILE)
+            existing_df = pd.read_csv(dataset_file)
             existing_df["time"] = pd.to_datetime(existing_df["time"])
             existing_df = existing_df.sort_values("time").reset_index(drop=True)
             last_date = existing_df["time"].max()
@@ -186,12 +256,12 @@ def fetch_fpt_data(days: int = 120) -> pd.DataFrame:
             # Debug: log existing dataset info
             first_date = existing_df["time"].min()
             print(
-                f"[DEBUG] Loaded existing dataset: {len(existing_df)} records "
-                f"from {first_date.date()} to {last_date.date()}"
+                f"[DEBUG] Loaded existing dataset from {dataset_file.name}: "
+                f"{len(existing_df)} records from {first_date.date()} to {last_date.date()}"
             )
         except Exception as e:
             # If can't read dataset, continue without it
-            print(f"[WARNING] Could not read existing dataset: {e}")
+            print(f"[WARNING] Could not read existing dataset from {dataset_file}: {e}")
             existing_df = None
             last_date = None
 

@@ -51,7 +51,28 @@ class ForecastService:
 
         # Convert to price
         current_price = price_buffer[-1]
+
+        # Validate current price before prediction
+        if current_price <= 0:
+            raise ValueError(
+                f"Invalid current price: {current_price}. " "Price must be positive for prediction."
+            )
+        if current_price > 1000:
+            print(
+                f"[WARNING] Unusually high price detected: {current_price:.2f}. "
+                "This might indicate a data unit issue (e.g., VND vs thousands VND)."
+            )
+
         predicted_price = current_price * np.exp(predicted_return)
+
+        # Validate predicted price
+        if predicted_price <= 0:
+            print(
+                f"[ERROR] Invalid predicted price: {predicted_price:.6f} "
+                f"(from return: {predicted_return:.6f}, current_price: {current_price:.2f})"
+            )
+            # Clamp to minimum reasonable value
+            predicted_price = max(0.01, current_price * 0.5)
 
         return predicted_return, predicted_price
 
@@ -158,8 +179,41 @@ class ForecastService:
             prepare_historical_data_for_prediction(historical_data, train_df)
         )
 
+        # Validate buffers before forecasting
+        if len(price_buffer) == 0:
+            raise ValueError("Price buffer is empty. Need at least 1 price value.")
+        if len(ret_buffer) == 0:
+            raise ValueError("Return buffer is empty. Need at least 1 return value.")
+
+        # Get last price for continuity validation
+        last_price = price_buffer[-1]
+        if last_price <= 0:
+            raise ValueError(f"Invalid last price: {last_price}. Must be > 0.")
+
         # Forecast
         start_date = last_date + pd.offsets.BDay(1)
-        return self.predict_multi_step(
+        results = self.predict_multi_step(
             ret_buffer, vol_buffer, price_buffer, volume_buffer, start_date, n_steps
         )
+
+        # Validate forecast continuity: first predicted price should be reasonable
+        if len(results["prices"]) > 0:
+            first_predicted_price = results["prices"][0]
+            price_change_pct = abs((first_predicted_price - last_price) / last_price) * 100
+
+            # Log continuity check
+            print(
+                f"[DEBUG] Forecast continuity check: "
+                f"last_historical_price={last_price:.2f}, "
+                f"first_forecast_price={first_predicted_price:.2f}, "
+                f"change={price_change_pct:.2f}%"
+            )
+
+            # Warn if change is too large (might indicate an issue)
+            if price_change_pct > 20:
+                print(
+                    f"[WARNING] Large price change in first forecast: "
+                    f"{price_change_pct:.2f}%. This might indicate an issue."
+                )
+
+        return results

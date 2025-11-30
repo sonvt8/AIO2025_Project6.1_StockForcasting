@@ -210,14 +210,30 @@ async def predict_realtime(request: RealtimePredictRequest):
 
     Automatically fetches FPT stock data from internet and predicts future prices.
     This endpoint replaces the need to manually provide historical_data.
+
+    Note: The 'historical_days' parameter is for backward compatibility only.
+    When an existing dataset (FPT_train.csv) is present, the function ALWAYS returns
+    ALL data from the dataset (from 2020-08-03) + newly fetched data, regardless of
+    the 'historical_days' value. The parameter only affects behavior when no existing
+    dataset exists.
     """
     try:
+        print(
+            f"[DEBUG] Received realtime prediction request: "
+            f"n_steps={request.n_steps}, historical_days={request.historical_days}"
+        )
         model_service = get_model_service()
         model_service.ensure_models_loaded()
 
         # Fetch data from internet (only missing data will be fetched)
+        # NOTE: historical_days parameter is for backward compatibility only.
+        # When existing dataset exists, ALL data is returned regardless of this parameter.
         try:
+            print(
+                f"[DEBUG] Calling fetch_fpt_data_as_dict_list with days={request.historical_days}"
+            )
             historical_data, metadata = fetch_fpt_data_as_dict_list(days=request.historical_days)
+            print(f"[DEBUG] Fetched {len(historical_data)} records, metadata: {metadata}")
         except ImportError as e:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -250,10 +266,51 @@ async def predict_realtime(request: RealtimePredictRequest):
         except Exception:
             train_df = None
 
-        # Predict multi-step
-        results = model_service.forecast_service.predict_from_historical_data(
-            historical_data, request.n_steps, train_df
-        )
+        # Validate that we have enough data and last_date is valid
+        if len(historical_data) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No historical data available for prediction.",
+            )
+
+        # Get last date from historical data to ensure forecast starts correctly
+        last_historical_date = pd.Timestamp(historical_data[-1]["time"])
+        expected_forecast_start = last_historical_date + pd.offsets.BDay(1)
+
+        # Predict multi-step with error handling
+        try:
+            results = model_service.forecast_service.predict_from_historical_data(
+                historical_data, request.n_steps, train_df
+            )
+        except ValueError as e:
+            # Log detailed error for debugging
+            print(f"[ERROR] Prediction failed with ValueError: {str(e)}")
+            print(f"[DEBUG] Historical data sample (first 3): {historical_data[:3]}")
+            print(f"[DEBUG] Historical data sample (last 3): {historical_data[-3:]}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Prediction failed: {str(e)}",
+            ) from e
+        except Exception as e:
+            # Log detailed error for debugging
+            print(f"[ERROR] Prediction failed with unexpected error: {str(e)}")
+            import traceback
+
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Prediction error: {str(e)}",
+            ) from e
+
+        # Validate forecast continuity: first forecast date should be next business day
+        if len(results["dates"]) > 0:
+            first_forecast_date = pd.Timestamp(results["dates"][0])
+            if first_forecast_date != expected_forecast_start:
+                print(
+                    f"[WARNING] Forecast start date mismatch: "
+                    f"expected {expected_forecast_start.date()}, "
+                    f"got {first_forecast_date.date()}"
+                )
 
         # Format predictions
         predictions = [
@@ -313,10 +370,28 @@ async def predict_realtime(request: RealtimePredictRequest):
     except HTTPException:
         raise
     except ValueError as e:
+        print(f"[ERROR] Prediction failed with ValueError: {e}")
+        print(
+            f"[DEBUG] Request parameters: "
+            f"n_steps={request.n_steps}, historical_days={request.historical_days}"
+        )
+        if "historical_data" in locals():
+            print(f"[DEBUG] Historical data length: {len(historical_data)}")
+            if len(historical_data) > 0:
+                print(f"[DEBUG] Historical data sample (first 3): {historical_data[:3]}")
+                print(f"[DEBUG] Historical data sample (last 3): {historical_data[-3:]}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid input: {str(e)}"
         ) from e
     except Exception as e:
+        print(f"[ERROR] Prediction failed with unexpected error: {e}")
+        print(
+            f"[DEBUG] Request parameters: "
+            f"n_steps={request.n_steps}, historical_days={request.historical_days}"
+        )
+        import traceback
+
+        traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Prediction error: {str(e)}"
         ) from e

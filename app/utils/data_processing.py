@@ -122,18 +122,86 @@ def prepare_historical_data_for_prediction(
             MODEL_CONFIG["clip_upper_q"],
         )
 
-    # Extract buffers
-    non_na = df_feat["ret_1d_clipped"].notna()
-    ret_series = df_feat.loc[non_na, "ret_1d_clipped"].values.astype(float)
-    vol_series = df_feat.loc[non_na, "vol_chg_clipped"].values.astype(float)
-    close_series = df_feat.loc[non_na, "close"].values.astype(float)
-    volume_series = df_feat.loc[non_na, "volume"].values.astype(float)
-    time_series = df_feat.loc[non_na, "time"].values
+    # Extract buffers - work directly with DataFrame to maintain index alignment
+    # Create masks on DataFrame first to ensure consistent indexing
+    non_na_mask = df_feat["ret_1d_clipped"].notna()
+
+    # Validate and filter prices (remove outliers) - work on DataFrame first
+    # FPT stock typically ranges from ~20 to ~150 (thousands VND)
+    # After normalization in data_fetcher, prices should be in this range
+    # Allow wider range (1-500) to account for potential future growth
+    price_mask_df = (df_feat["close"] > 0) & (df_feat["close"] < 1000)
+
+    # Check if we have enough valid prices
+    valid_price_count = price_mask_df.sum()
+    total_price_count = len(df_feat)
+
+    if valid_price_count < total_price_count * 0.5:
+        # If more than 50% are outliers, something is wrong
+        print(
+            f"[WARNING] Many prices outside normal range (0-1000). "
+            f"Found {total_price_count - valid_price_count} outliers out of {total_price_count}. "
+            "This might indicate a data unit mismatch or data quality issue."
+        )
+        # Still use all positive prices but log warning
+        price_mask_df = df_feat["close"] > 0
+        valid_price_count = price_mask_df.sum()
+
+    # Combine masks: need both non-NA returns AND valid prices
+    # Both are pandas Series with same index, so this will work correctly
+    valid_mask = non_na_mask & price_mask_df
+
+    # Debug: log mask counts
+    print(
+        f"[DEBUG] Data filtering: total={len(df_feat)}, "
+        f"non_na={non_na_mask.sum()}, "
+        f"price_valid={price_mask_df.sum()}, "
+        f"final_valid={valid_mask.sum()}"
+    )
+
+    if valid_mask.sum() == 0:
+        raise ValueError(
+            f"No valid data after filtering. "
+            f"Total records: {len(df_feat)}, "
+            f"non_na: {non_na_mask.sum()}, "
+            f"price_valid: {price_mask_df.sum()}, "
+            f"final_valid: {valid_mask.sum()}. "
+            "Check data quality and units."
+        )
+
+    ret_series = df_feat.loc[valid_mask, "ret_1d_clipped"].values.astype(float)
+    vol_series = df_feat.loc[valid_mask, "vol_chg_clipped"].values.astype(float)
+    close_series = df_feat.loc[valid_mask, "close"].values.astype(float)
+    volume_series = df_feat.loc[valid_mask, "volume"].values.astype(float)
+    time_series = df_feat.loc[valid_mask, "time"].values
+
+    if len(close_series) == 0:
+        raise ValueError(
+            "No valid price data after filtering. "
+            f"Valid mask count: {valid_mask.sum()}, "
+            "Check data quality and units."
+        )
 
     ret_buffer = list(ret_series[-20:])
     vol_buffer = list(vol_series[-5:])
     price_buffer = list(close_series[-20:])
     volume_buffer = list(volume_series[-20:])
     last_date = pd.Timestamp(time_series[-1])
+
+    # Debug: verify all buffers have consistent length
+    if len(ret_buffer) != len(price_buffer) or len(price_buffer) != len(volume_buffer):
+        print(
+            f"[WARNING] Buffer length mismatch: "
+            f"ret={len(ret_buffer)}, price={len(price_buffer)}, "
+            f"volume={len(volume_buffer)}"
+        )
+
+    # Debug: log buffer info
+    if len(price_buffer) > 0:
+        print(
+            f"[DEBUG] Price buffer: {len(price_buffer)} values, "
+            f"range: {min(price_buffer):.2f} to {max(price_buffer):.2f}, "
+            f"last: {price_buffer[-1]:.2f}"
+        )
 
     return ret_buffer, vol_buffer, price_buffer, volume_buffer, last_date
