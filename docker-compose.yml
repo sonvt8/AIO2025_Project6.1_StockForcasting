@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  # FastAPI Backend Service
+  backend:
+    image: sonvt8/backend-stockforcasting:1.0.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fpt-api-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount data directory to persist datasets
+      - ./data:/app/data
+      # Mount models directory to persist trained models
+      - ./app/models:/app/app/models
+      # Mount code for development (optional - remove in production)
+      - ./app:/app/app
+      - ./frontend:/app/frontend
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONIOENCODING=utf-8
+    command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - fpt-network
+
+  # Streamlit Frontend Service
+  frontend:
+    image: sonvt8/frontend-stockforcasting:1.0.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fpt-streamlit-frontend
+    ports:
+      - "8501:8501"
+    volumes:
+      # Mount data directory
+      - ./data:/app/data
+      # Mount code for development
+      - ./app:/app/app
+      - ./frontend:/app/frontend
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONIOENCODING=utf-8
+      # Point to backend service
+      - API_BASE_URL=http://backend:8000
+    command: streamlit run frontend/streamlit_app/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - fpt-network
+
+networks:
+  fpt-network:
+    driver: bridge

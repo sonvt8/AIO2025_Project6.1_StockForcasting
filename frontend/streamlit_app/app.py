@@ -1,5 +1,6 @@
 """Interactive Streamlit UI for the FPT Stock Forecasting project."""
 
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -23,7 +24,9 @@ JS_PATH = BASE_DIR / "frontend" / "streamlit_app" / "assets" / "js" / "animation
 DATA_RAW_DIR = BASE_DIR / "data" / "raw"
 
 # API Configuration
-API_BASE_URL = "http://localhost:8000"  # Change this if your API runs on different port
+API_BASE_URL = os.getenv(
+    "API_BASE_URL", "http://localhost:8000"
+)  # Can be overridden via environment variable
 
 
 def check_dataset_exists() -> Path | None:

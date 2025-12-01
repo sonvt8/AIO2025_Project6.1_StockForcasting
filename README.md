@@ -1,6 +1,6 @@
 # FPT Stock Prediction API
 
-ElasticNet selective-features baseline (+100 day forecasting) được triển khai thành FastAPI backend + Streamlit UI. README này gộp nội dung quan trọng từ các tài liệu khác, giúp bạn hiểu kiến trúc, pipeline, cách khởi tạo và chạy lại toàn bộ project (kể cả luồng realtime data).
+ElasticNet selective-features baseline (+100 day forecasting) được triển khai thành FastAPI backend + Streamlit UI. README này được phát triển dựa trên luồng thực nghiệm và đánh giá metric thông qua cuộc thi [Kaggle AIO2025-StockForcasting](https://www.kaggle.com/competitions/aio-2025-linear-forecasting-challenge/) , giúp bạn hiểu kiến trúc, pipeline, cách khởi tạo và chạy lại toàn bộ project (kể cả luồng realtime data).
 
 ---
 
@@ -42,7 +42,7 @@ project6.1/
 ```
 
 **Tóm tắt kiến trúc:**
-- **Model**: ElasticNet (V6 selective features), train từ `FPT_train.csv` rồi export vào `app/models/artifacts/`.
+- **Model**: ElasticNet (V6 selective features), train từ `*.csv` trong `data/raw/` rồi export vào `app/models/artifacts/`.
 - **API**: FastAPI đọc artifacts, xử lý input, dự báo single/multi/full/realtime.
 - **Realtime**: `data_fetcher.py` dùng vnstock để lấy phần dữ liệu mới, merge với dataset gốc, rồi tái sử dụng cùng pipeline.
 - **UI**: Streamlit sử dụng API để hiển thị forecast và metadata.
@@ -140,6 +140,77 @@ pip install -r requirements.txt
 
 ---
 
+## 3.1. Chạy với Docker (Khuyến nghị)
+
+### 3.1.1. Yêu cầu
+- Docker Engine 20.10+
+- Docker Compose 2.0+
+
+### 3.1.2. Khởi động ứng dụng
+
+```bash
+# Build và khởi động tất cả services
+docker-compose up --build
+
+# Hoặc chạy ở chế độ background
+docker-compose up -d --build
+```
+
+Sau khi khởi động:
+- **FastAPI Backend**: http://localhost:8000
+  - Swagger UI: http://localhost:8000/docs
+  - ReDoc: http://localhost:8000/redoc
+- **Streamlit Frontend**: http://localhost:8501
+
+### 3.1.3. Dừng ứng dụng
+
+```bash
+# Dừng services
+docker-compose down
+
+# Dừng và xóa volumes (xóa dữ liệu)
+docker-compose down -v
+```
+
+### 3.1.4. Xem logs
+
+```bash
+# Xem logs tất cả services
+docker-compose logs -f
+
+# Xem logs một service cụ thể
+docker-compose logs -f backend
+docker-compose logs -f frontend
+```
+
+### 3.1.5. Training model trong Docker
+
+```bash
+# Chạy training script trong container backend
+docker-compose exec backend python -m app.utils.model_trainer
+
+# Hoặc chạy một lệnh tùy chỉnh
+docker-compose exec backend python -c "from app.utils.model_trainer import train_and_export_models; train_and_export_models()"
+```
+
+### 3.1.6. Cấu trúc Docker
+
+- **Dockerfile**: Base image Python 3.11-slim, cài đặt dependencies
+- **docker-compose.yml**:
+  - Service `backend`: FastAPI trên port 8000
+  - Service `frontend`: Streamlit trên port 8501
+  - Volumes: Mount `data/` và `app/models/` để persist dữ liệu
+  - Network: Bridge network để các services giao tiếp
+
+### 3.1.7. Lưu ý
+
+- Dữ liệu trong `data/` và `app/models/` được persist qua volumes
+- Code được mount vào container để development dễ dàng (có thể disable trong production)
+- Streamlit tự động kết nối đến backend qua internal network (`http://backend:8000`)
+- Nếu cần thay đổi port, sửa trong `docker-compose.yml`
+
+---
+
 ## 4. Training vs Prediction
 
 ### 4.1. Training (chạy khi cần build/rebuild model)
@@ -158,7 +229,7 @@ Kết quả: các file `.pkl` + `model_config.json` được ghi vào `app/model
 - API load model qua `ModelLoader` khi start server (hoặc khi nhận request đầu tiên).
 - Các endpoint `/predict/single`, `/multi`, `/full` nhận `historical_data` từ client.
 - Endpoint `/predict/realtime` **tự động**:
-  1. Đọc `FPT_train.csv` để biết last date đang có.
+  1. Đọc `*.csv` để biết last date đang có.
   2. Dùng vnstock để lấy giá FPT từ ngày sau đó đến ngày hiện tại.
   3. Merge, winsorize, build features và dự báo N ngày tới.
 
@@ -168,7 +239,13 @@ Model **không thay đổi** trừ khi bạn chạy lại training script.
 
 ## 5. Chạy API & Streamlit
 
-### 5.1. Chạy FastAPI Backend
+### 5.1. Chạy với Docker (Khuyến nghị)
+
+Xem mục **3.1. Chạy với Docker** ở trên.
+
+### 5.2. Chạy thủ công (không dùng Docker)
+
+#### 5.2.1. Chạy FastAPI Backend
 
 ```bash
 uvicorn app.main:app --reload
@@ -177,11 +254,13 @@ uvicorn app.main:app --reload
 - Swagger: `http://localhost:8000/docs`
 - ReDoc:   `http://localhost:8000/redoc`
 
-### 5.2. Chạy Streamlit UI
+#### 5.2.2. Chạy Streamlit UI
 
 ```bash
 streamlit run frontend/streamlit_app/app.py
 ```
+
+**Lưu ý**: Khi chạy thủ công, đảm bảo FastAPI đang chạy trước khi mở Streamlit.
 
 ### 5.3. Hai Chế Độ Prediction trong UI
 
