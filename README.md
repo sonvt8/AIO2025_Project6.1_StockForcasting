@@ -433,7 +433,7 @@ Payload mẫu (single/multi/full):
 - Dữ liệu đầu vào phải hợp lệ (giá > 0, `high ≥ low`, `close` trong [low, high]).
 - Thời gian dự báo sử dụng business days (bỏ cuối tuần, holidays mặc định theo pandas).
 - Project phục vụ mục đích học tập / kiểm tra, không dùng trực tiếp cho trading thật.
-- Pipeline dựa trên notebook baseline `improved_v6_selective_features.ipynb` và đã được đóng gói lại thành các service/module trong thư mục `app/`.
+- Pipeline dựa trên notebook baseline `baseline_elastic_v1.ipynb` và đã được đóng gói lại thành các service/module trong thư mục `app/`.
 
 ---
 

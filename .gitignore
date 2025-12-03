@@ -57,4 +57,4 @@ logs/
 Thumbs.db
 
 # Data (optional - uncomment if you don't want to commit data)
-data/raw/*.csv
+# data/raw/*.csv
