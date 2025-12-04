@@ -162,9 +162,9 @@ def render_header() -> None:
         "</div>"
         '<div class="glow-divider"></div>'
         "<div>"
-        '<span class="tag-pill">ElasticNet V6</span>'
-        '<span class="tag-pill">Selective Features</span>'
-        '<span class="tag-pill">100-Step Forecast</span>'
+        '<span class="tag-pill">PatchTST V2</span>'
+        '<span class="tag-pill">Post-processing</span>'
+        '<span class="tag-pill">Smooth Bias Correction</span>'
         "</div>"
         "</div>"
     )

@@ -41,6 +41,8 @@ ENV/
 # (Models should be downloaded from GitHub releases or trained locally)
 app/models/artifacts/*.pkl
 app/models/artifacts/*.json
+app/models/artifacts/*.pt
+app/models/artifacts/*.ckpt
 !app/models/artifacts/.gitkeep
 
 # Environment variables
@@ -50,6 +52,7 @@ app/models/artifacts/*.json
 # Logs
 *.log
 logs/
+lightning_logs/
 *.ps1
 
 # OS

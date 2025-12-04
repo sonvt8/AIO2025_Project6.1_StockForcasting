@@ -19,7 +19,8 @@ from app.api.schemas import (
 )
 from app.services.data_fetcher import fetch_fpt_data_as_dict_list
 from app.services.model_service import ModelService
-from app.utils.data_processing import load_data, prepare_historical_data_for_prediction
+
+# v2 no longer requires feature engineering utilities
 
 router = APIRouter()
 
@@ -77,21 +78,17 @@ async def predict_single(request: SinglePredictRequest):
         # Convert to list of dicts
         historical_data = [item.dict() for item in request.historical_data]
 
-        # Prepare buffers
-        ret_buffer, vol_buffer, price_buffer, volume_buffer, last_date = (
-            prepare_historical_data_for_prediction(historical_data)
+        # Predict single step using v2 service
+        results = model_service.forecast_service.predict_from_historical_data(
+            historical_data, n_steps=1
         )
-
-        # Predict single step
-        forecast_date = last_date + pd.offsets.BDay(1)
-        pred_return, pred_price = model_service.forecast_service.predict_single_step(
-            ret_buffer, vol_buffer, price_buffer, volume_buffer, last_date
-        )
-
+        forecast_date = pd.Timestamp(results["dates"][0]).strftime("%Y-%m-%d")
+        pred_price = float(results["prices"][0])
+        pred_return = float(results["returns"][0])
         return SinglePredictResponse(
             predicted_price=round(pred_price, 2),
             predicted_return=round(pred_return, 6),
-            forecast_date=forecast_date.strftime("%Y-%m-%d"),
+            forecast_date=forecast_date,
         )
 
     except ValueError as e:
@@ -118,15 +115,9 @@ async def predict_multi(request: MultiPredictRequest):
         # Convert to list of dicts
         historical_data = [item.dict() for item in request.historical_data]
 
-        # Load training data for proper feature engineering
-        try:
-            train_df = load_data()
-        except Exception:
-            train_df = None
-
-        # Predict multi-step
+        # Predict multi-step using v2 (no training data required)
         results = model_service.forecast_service.predict_from_historical_data(
-            historical_data, request.n_steps, train_df
+            historical_data, request.n_steps
         )
 
         # Format predictions
@@ -167,15 +158,9 @@ async def predict_full(request: FullPredictRequest):
         # Convert to list of dicts
         historical_data = [item.dict() for item in request.historical_data]
 
-        # Load training data for proper feature engineering
-        try:
-            train_df = load_data()
-        except Exception:
-            train_df = None
-
-        # Predict 100 steps
+        # Predict 100 steps using v2 (no training data required)
         results = model_service.forecast_service.predict_from_historical_data(
-            historical_data, n_steps=100, train_df=train_df
+            historical_data, n_steps=100
         )
 
         # Format predictions
@@ -260,12 +245,6 @@ async def predict_realtime(request: RealtimePredictRequest):
         # Get latest date from metadata or data
         latest_date = metadata.get("last_date") or historical_data[-1]["time"]
 
-        # Load training data for proper feature engineering
-        try:
-            train_df = load_data()
-        except Exception:
-            train_df = None
-
         # Validate that we have enough data and last_date is valid
         if len(historical_data) == 0:
             raise HTTPException(
@@ -280,7 +259,7 @@ async def predict_realtime(request: RealtimePredictRequest):
         # Predict multi-step with error handling
         try:
             results = model_service.forecast_service.predict_from_historical_data(
-                historical_data, request.n_steps, train_df
+                historical_data, request.n_steps
             )
         except ValueError as e:
             # Log detailed error for debugging
