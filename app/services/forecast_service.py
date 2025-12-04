@@ -47,7 +47,9 @@ class ForecastService:
         close_history: list[float] = df["close"].astype(float).tolist()
 
         # Use model horizon; limit n_steps if needed inside loader
-        prices = self.loader.predict_prices(close_history, n_steps).astype(float)
+        prices = self.loader.predict_prices(close_history, n_steps)
+        # Ensure 1D float array
+        prices = np.asarray(prices, dtype=float).reshape(-1)
 
         # Build forecast dates: start from next business day
         start_date = last_date + pd.offsets.BDay(1)
@@ -57,8 +59,9 @@ class ForecastService:
         returns = np.zeros_like(prices, dtype=float)
         prev_price = float(close_history[-1])
         for i, p in enumerate(prices):
-            p_safe = max(p, 1e-8)
-            prev_safe = max(prev_price, 1e-8)
+            p_val = float(p)
+            p_safe = p_val if p_val > 1e-8 else 1e-8
+            prev_safe = prev_price if prev_price > 1e-8 else 1e-8
             returns[i] = float(np.log(p_safe / prev_safe))
             prev_price = p_safe
 

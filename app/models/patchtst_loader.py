@@ -164,9 +164,13 @@ class PatchTSTLoader:
 
     # --- Core helpers ---
     def _post_process(self, baseline: np.ndarray) -> np.ndarray:
+        # Ensure 1D float baseline
+        baseline = np.asarray(baseline, dtype=float).reshape(-1)
         if self.post_model is None:
             return baseline
-        return self.post_model.predict(baseline.reshape(-1, 1))
+        pred = self.post_model.predict(baseline.reshape(-1, 1))
+        # scikit-learn returns shape (n, 1) for some regressors; flatten to 1D
+        return np.asarray(pred, dtype=float).reshape(-1)
 
     def _smooth_linear_20(
         self, baseline: np.ndarray, post: np.ndarray, ratio: float = 0.2
@@ -188,8 +192,11 @@ class PatchTSTLoader:
     def predict_prices(self, close_history: list[float], horizon: int) -> np.ndarray:
         """Return final prices after post-processing + smoothing (v2 best method)."""
         baseline = self.predict_sequence(close_history, horizon)
+        baseline = np.asarray(baseline, dtype=float).reshape(-1)
         post = self._post_process(baseline)
+        post = np.asarray(post, dtype=float).reshape(-1)
         smooth = self._smooth_linear_20(baseline, post, self.smooth_cfg.smooth_ratio)
+        smooth = np.asarray(smooth, dtype=float).reshape(-1)
         # Clamp negatives to zero
         smooth = np.maximum(smooth, 0.0)
         return smooth
@@ -221,8 +228,9 @@ class PatchTSTLoader:
             raise ValueError(f"Need at least {input_size} points, got {len(close_history)}")
 
         window = np.array(close_history[-input_size:], dtype=np.float32)
-        # Expect shape [batch, seq_len]
-        x = torch.from_numpy(window[None, :, None])  # shape (1, input_size)
+        # Expected PatchTST input shape: [batch, channels, seq_len]
+        # Our univariate series => channels=1
+        x = torch.from_numpy(window[None, None, :]).float()  # shape (1, 1, input_size)
 
         with torch.no_grad():
             # Many NF models output y_hat scaled as same unit as input
@@ -236,8 +244,13 @@ class PatchTSTLoader:
                 else:
                     raise
 
-        # y_hat shape: (batch, horizon)
-        y_hat_np = y_hat.squeeze(0).cpu().numpy().astype(float)
+        # y_hat may have shape (batch, horizon) or (batch, 1, horizon)
+        y_hat_np = y_hat.detach().cpu().numpy().astype(float)
+        # Squeeze all singleton dims to get 1D horizon vector
+        y_hat_np = np.squeeze(y_hat_np)
+        if y_hat_np.ndim > 1:
+            # Fallback: flatten
+            y_hat_np = y_hat_np.reshape(-1)
         y_hat_np = y_hat_np[:horizon]
         return y_hat_np
 

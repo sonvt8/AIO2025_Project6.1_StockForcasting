@@ -2,7 +2,7 @@
 Pydantic schemas for API request/response validation
 """
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, validator
 
 
 class StockDataPoint(BaseModel):
@@ -83,6 +83,8 @@ class FullPredictResponse(BaseModel):
 
 class ModelInfoResponse(BaseModel):
     """Response for model information"""
+
+    model_config = ConfigDict(protected_namespaces=())
 
     status: str
     model_type: str | None = None
