@@ -24,6 +24,7 @@ The v2 replaces the baseline ElasticNet (v1) with a stronger, inference-only Pat
 10. [Installation & Setup](#10-installation--setup)
 11. [Data Format](#11-data-format)
 12. [Troubleshooting](#12-troubleshooting)
+13. [Docker Deployment Guide](#13-docker-deployment-guide)
 
 ---
 
@@ -342,7 +343,22 @@ python -c "from app.utils.device_detector import detect_device; import json; pri
 
 - **CUDA (GPU)**: MSE ≤ 18.5
 - **MPS (Apple Silicon)**: MSE ≤ 50.0
-- **CPU**: MSE ≤ 80.0 (inference with NF path may be higher than training MSE)
+- **CPU (Local)**: MSE ≤ 80.0 (inference with NF path may be higher than training MSE)
+- **CPU (Docker Container)**: MSE ~16-20 (typically better than local CPU due to consistent environment)
+
+**Note on Docker Container Performance:**
+Docker containers often achieve better MSE than local CPU environments because:
+- Consistent Python/PyTorch versions
+- Isolated environment reduces interference
+- Optimized container runtime
+- Example: Docker CPU container achieved MSE=16.28 (Smooth20) vs local CPU Windows MSE~76
+
+**Training Metrics (from Docker container logs):**
+```
+Baseline: MSE=628.3367, Bias=23.6929
+Post:     MSE=60.4648,  Bias=-3.2996
+Smooth20: MSE=16.2760,  Bias=-0.8466  ← Final result
+```
 
 ---
 
@@ -407,10 +423,18 @@ streamlit run frontend/streamlit_app/app.py
 
 **Docker Compose (optional):**
 ```bash
-docker compose up --build
+# Build with training + verify artifacts inside build (CPU)
+docker compose build
+docker compose up
 # API: http://localhost:8000
 # UI:  http://localhost:8501
 ```
+
+**Compose behavior (current repo config):**
+- `docker-compose.yml` backend build uses `Dockerfile.production` with `RUN_TRAIN=1`, `RUN_ARTIFACT_EVAL=1`
+- During build: train artifacts (CPU) + verify inference MSE; logs show metrics
+- Built image tag: `sonvt8/backend-stockforcasting:1.0.0-cpu`
+- Container starts `healthy` immediately (artifacts baked in); no first-run training wait
 
 ### First Run - Artifacts Auto-Training
 
@@ -448,9 +472,72 @@ python scripts/run_patchtst_export.py \
   --deterministic --workspace-config :4096:8
 ```
 
-This will create artifacts in `app/models/artifacts/{device_type}_{fingerprint}/` for your device.
+This will create artifacts in `app/models/artifacts/{device_type}_{fingerprint}/` for your device
+(auto device-specific directory is enabled by default).
+
+**Post-export parity check (recommended):**
+Artifacts are reloaded and scored right after export to ensure inference parity with training:
+```bash
+python scripts/verify_artifacts_inference.py \
+  --train data/raw/FPT_train.csv \
+  --test data/test/FPT_test.csv \
+  --horizon 100 \
+  --artifacts app/models/artifacts/<device_type>_<fingerprint>
+```
 
 **Note**: Artifacts are device-specific. Artifacts trained on GPU won't work optimally on CPU/MPS, so auto-train ensures you get artifacts optimized for your hardware.
+
+### Using Pre-trained Docker Images (Skip Training on First Run)
+
+If you want to use a Docker image that already contains pre-trained artifacts (so the container starts as `healthy` immediately), you have two options:
+
+#### Option 1: Build Image with Pre-trained Artifacts (Recommended)
+
+CPU build (train+verify inside build):
+```bash
+docker build -f Dockerfile.production -t sonvt8/backend-stockforcasting:1.0.0-cpu . \
+  --build-arg RUN_TRAIN=1 \
+  --build-arg RUN_ARTIFACT_EVAL=1
+```
+- Logs will show training metrics (Smooth20) and verify MSE when reloading artifacts.
+- Image contains baked CPU artifacts; starts `healthy` immediately.
+
+Push (optional):
+```bash
+docker push sonvt8/backend-stockforcasting:1.0.0-cpu
+```
+
+Use in compose (already configured in `docker-compose.yml`):
+- Backend build uses `Dockerfile.production` with the args above.
+- Image tag: `sonvt8/backend-stockforcasting:1.0.0-cpu`.
+
+**Note**: Artifacts in the image are device-specific (trained for the device used during build). For best results:
+- If building on CPU, the image will work best on CPU environments
+- If building on GPU, the image will work best on GPU environments
+- Users can still override by mounting their own artifacts via volumes
+
+#### Option 2: Use Pre-built Images from Docker Hub
+
+If pre-built images are available on Docker Hub:
+```bash
+# Pull pre-built images
+docker pull sonvt8/backend-stockforcasting:1.0.0
+docker pull sonvt8/frontend-stockforcasting:1.0.0
+
+# Start with docker-compose (images already contain artifacts)
+docker compose up
+```
+
+**Benefits of Pre-trained Images:**
+- ✅ Container starts as `healthy` immediately (no training wait)
+- ✅ Faster startup time
+- ✅ Consistent artifacts across deployments
+- ✅ No need to wait 5-15 minutes on first run
+
+**Trade-offs:**
+- ⚠️ Artifacts are device-specific (may not be optimal for all hardware)
+- ⚠️ Image size is larger (includes model files)
+- ⚠️ Users may still want to retrain for their specific device
 
 ---
 
@@ -475,6 +562,22 @@ The system auto-converts fetched prices from VND to thousands VND if needed (max
 ---
 
 ## 12. Troubleshooting
+
+### Docker Container Shows "Unhealthy" Status
+
+**Symptom**: `docker ps` shows `fpt-api-backend` container as `(unhealthy)`
+
+**Cause**: This is **normal on first run** - the container is training the model automatically.
+
+**Solution**:
+- **Wait for training to complete** (5-15 minutes depending on hardware)
+- Monitor progress: `docker logs -f fpt-api-backend`
+- Container will become `healthy` once training completes
+- On subsequent runs, if artifacts are cached, container will be `healthy` immediately
+
+**To skip training on first run**:
+- Use pre-built Docker images with artifacts included (see [Using Pre-trained Docker Images](#using-pre-trained-docker-images))
+- Or mount pre-trained artifacts via volumes in `docker-compose.yml`
 
 ### Artifacts Not Found
 
@@ -509,8 +612,11 @@ The system auto-converts fetched prices from VND to thousands VND if needed (max
 - CUDA GPU: ~3-5 minutes
 - MPS (Apple Silicon): ~10-15 minutes
 - CPU: ~20-30 minutes
+- CPU (Docker Container): ~10-20 minutes
 
-**Solution**: Wait for completion, artifacts will be cached for future use
+**Solution**:
+- Wait for completion, artifacts will be cached for future use
+- To avoid waiting, use pre-built Docker images with artifacts (see [Using Pre-trained Docker Images](#using-pre-trained-docker-images))
 
 ### Device Detection Issues
 
@@ -522,6 +628,98 @@ python -c "from app.utils.device_detector import detect_device; import json; pri
 **Force device type** (if needed):
 - Set `CUDA_VISIBLE_DEVICES=""` to force CPU
 - Set `PYTORCH_ENABLE_MPS_FALLBACK=0` to disable MPS
+
+---
+
+## 13. Docker Deployment Guide
+
+### Quick Start with Docker Compose
+
+```bash
+# Build (train + verify artifacts inside image) then run
+docker compose build
+docker compose up
+```
+
+### Understanding Container Health Status
+
+**Current compose config (repo default):**
+- Backend build (Dockerfile.production) runs training + verify during image build (CPU)
+- Artifacts are baked into the image; container starts `healthy` immediately
+- Build logs show training metrics and verify MSE (reload artifacts)
+
+### Building Production Images with Pre-trained Artifacts
+
+**Step 1: Train artifacts locally**
+```bash
+python scripts/run_patchtst_export.py \
+  --train data/raw/FPT_train.csv \
+  --test data/test/FPT_test.csv \
+  --out app/models/artifacts \
+  --deterministic --workspace-config :4096:8
+```
+
+**Step 1b: Verify artifacts (optional but recommended)**
+```bash
+python scripts/verify_artifacts_inference.py \
+  --train data/raw/FPT_train.csv \
+  --test data/test/FPT_test.csv \
+  --horizon 100 \
+  --artifacts app/models/artifacts/<device_type>_<fingerprint>
+```
+
+**Step 2: Build production images**
+```bash
+# Build backend image with artifacts
+docker build -f Dockerfile.production -t sonvt8/backend-stockforcasting:1.0.0 .
+
+# Build frontend image
+docker build -f Dockerfile.production -t sonvt8/frontend-stockforcasting:1.0.0 .
+```
+
+To run artifact verification during image build:
+```bash
+docker build -f Dockerfile.production -t sonvt8/backend-stockforcasting:1.0.0 . \
+  --build-arg RUN_ARTIFACT_EVAL=1
+```
+
+**Step 3: Push to Docker Hub (optional)**
+```bash
+docker push sonvt8/backend-stockforcasting:1.0.0
+docker push sonvt8/frontend-stockforcasting:1.0.0
+```
+
+**Step 4: Use pre-built images**
+```bash
+# Pull and use pre-built images
+docker compose up
+# Containers will start as 'healthy' immediately (no training wait)
+```
+
+### Docker Compose Configuration
+
+The `docker-compose.yml` includes:
+- **Volume mounts**: Persist artifacts and data between container restarts
+- **Health checks**: Monitor container readiness
+- **Auto-restart**: Containers restart automatically on failure
+- **Network**: Isolated network for backend-frontend communication
+
+**Key volumes:**
+- `./app/models:/app/app/models` - Persists trained artifacts
+- `./data:/app/data` - Persists datasets
+- `./app:/app/app` - Development code mounting (optional, remove in production)
+
+### Performance Notes
+
+**Docker Container vs Local Environment:**
+- Docker containers often achieve **better MSE** than local CPU environments
+- Example: Docker CPU container MSE=16.28 vs local CPU Windows MSE~76
+- Reasons: Consistent environment, optimized runtime, isolated dependencies
+
+**Device-Specific Artifacts:**
+- Artifacts trained in Docker (CPU) work best in CPU environments
+- Artifacts trained on GPU work best on GPU
+- System auto-detects device and uses appropriate artifacts
 
 ---
 

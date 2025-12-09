@@ -41,6 +41,13 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import TimeSeriesSplit
 
+# Ensure project root on sys.path when running as a script (after stdlib/3rd-party imports)
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from app.utils.device_detector import get_device_artifact_dir  # noqa: E402
+
 # -------------------------- CLI & helpers --------------------------
 
 
@@ -52,6 +59,21 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--test", type=str, default="data/test/FPT_test.csv", help="Path to test CSV")
     p.add_argument(
         "--out", type=str, default="app/models/artifacts", help="Output directory for artifacts"
+    )
+    p.add_argument(
+        "--auto-device-dir",
+        action="store_true",
+        default=True,
+        help=(
+            "Place artifacts into device-specific subdir (e.g., cpu_xxx). "
+            "Disable with --no-auto-device-dir."
+        ),
+    )
+    p.add_argument(
+        "--no-auto-device-dir",
+        action="store_false",
+        dest="auto_device_dir",
+        help="Disable device-specific subdir; use output directory as-is.",
     )
     p.add_argument("--horizon", type=int, default=100, help="Forecast horizon")
     p.add_argument(
@@ -67,6 +89,18 @@ def parse_args() -> argparse.Namespace:
         "--download-if-missing",
         action="store_true",
         help="Download CSVs from Google Drive if not found",
+    )
+    p.add_argument(
+        "--verify-after-export",
+        action="store_true",
+        default=True,
+        help="Reload artifacts after export and compute MSE for parity check",
+    )
+    p.add_argument(
+        "--no-verify-after-export",
+        action="store_false",
+        dest="verify_after_export",
+        help="Skip post-export verification",
     )
     return p.parse_args()
 
@@ -385,8 +419,8 @@ def export_artifacts(out_dir: Path, res: dict) -> dict:
 # -------------------------- Main --------------------------
 
 
-def main() -> None:
-    args = parse_args()
+def main(args: argparse.Namespace | None = None) -> None:
+    args = args or parse_args()
 
     # Determinism (must be set before torch ops)
     configure_determinism(args.deterministic, args.workspace_config)
@@ -440,6 +474,38 @@ def main() -> None:
     print("\n=== SESSION SUMMARY ===")
     print(json.dumps(summary, indent=2))
 
+    # Optional: verify inference using freshly exported artifacts
+    if args.verify_after_export:
+        from scripts.verify_artifacts_inference import main as verify_main  # type: ignore
+
+        print("\n=== VERIFYING EXPORTED ARTIFACTS (INFERENCE) ===")
+        # Build argv for verifier to ensure it uses the same artifacts
+        sys.argv = [
+            "verify_artifacts_inference",
+            "--train",
+            str(train_csv),
+            "--test",
+            str(test_csv),
+            "--horizon",
+            str(args.horizon),
+            "--artifacts",
+            str(out_dir),
+        ]
+        verify_main()
+
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    # Determine device-specific output directory if requested
+    base_out_dir = Path(args.out)
+    if args.auto_device_dir:
+        base_out_dir.mkdir(parents=True, exist_ok=True)
+        out_dir = get_device_artifact_dir(base_out_dir)
+        print(f"[INFO] Auto device dir enabled. Saving artifacts to: {out_dir}")
+    else:
+        out_dir = base_out_dir
+        print(f"[INFO] Using output directory: {out_dir}")
+
+    # Inject resolved out_dir before running
+    args.out = str(out_dir)
+    main(args)

@@ -406,6 +406,8 @@ async def test_metrics(request: MetricTestRequest):
 
         model_service = get_model_service()
         model_service.ensure_models_loaded()
+        # Ensure parity with training pipeline (NF inference path)
+        model_service.model_loader.set_use_nf_inference(True)
 
         # Get device info
         device_info = detect_device()

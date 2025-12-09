@@ -1,26 +1,27 @@
-version: '3.8'
-
 services:
   # FastAPI Backend Service
   backend:
-    image: sonvt8/backend-stockforcasting:1.0.0
+    image: sonvt8/backend-stockforcasting:1.0.0-cpu
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.production
+      args:
+        RUN_TRAIN: "1"          # train artifacts during build
+        RUN_ARTIFACT_EVAL: "1"  # verify artifacts (MSE) during build
     container_name: fpt-api-backend
     ports:
       - "8000:8000"
     volumes:
       # Mount data directory to persist datasets
       - ./data:/app/data
-      # Mount models directory to persist trained models
-      - ./app/models:/app/app/models
-      # Mount code for development (optional - remove in production)
-      - ./app:/app/app
-      - ./frontend:/app/frontend
+      # Optional in development; comment out in production to use baked artifacts/code
+      # - ./app/models:/app/app/models
+      # - ./app:/app/app
+      # - ./frontend:/app/frontend
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONIOENCODING=utf-8
+      - PATCHTST_USE_NF=1
     command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health').raise_for_status()"]

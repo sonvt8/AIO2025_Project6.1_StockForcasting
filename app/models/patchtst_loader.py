@@ -55,10 +55,18 @@ class PatchTSTLoader:
         use_nf_inference: bool | None = None,
         auto_train: bool | None = None,
     ) -> None:
-        # Auto-detect device and use device-specific artifact directory
-        base_dir = models_dir or MODEL_PATHS["patchtst_ckpt"].parent
+        """
+        models_dir:
+            - None (default): auto-pick device-specific directory under app/models/artifacts
+            - Path: if you pass a device-specific directory, it will be used as-is
+        """
         self.device_info = detect_device()
-        self.device_artifact_dir = get_device_artifact_dir(base_dir)
+        if models_dir is not None:
+            # Respect explicit device-specific directory (no extra nesting)
+            self.device_artifact_dir = Path(models_dir)
+        else:
+            base_dir = MODEL_PATHS["patchtst_ckpt"].parent
+            self.device_artifact_dir = get_device_artifact_dir(base_dir)
         self.models_dir = self.device_artifact_dir
 
         self.model: torch.nn.Module | None = None
@@ -68,10 +76,10 @@ class PatchTSTLoader:
         self._loaded = False
         # strict_nf=True: nếu NF lỗi sẽ raise để tránh âm thầm lệch kết quả
         self.strict_nf = strict_nf
-        # use_nf_inference: nếu False sẽ dùng raw forward (ưu tiên ổn định với artifact đã train);
-        # có thể bật qua env PATCHTST_USE_NF=1
+        # use_nf_inference: nếu False sẽ dùng raw forward; mặc định bật để bám sát pipeline training
+        # có thể tắt qua env PATCHTST_USE_NF=0
         if use_nf_inference is None:
-            env_flag = os.getenv("PATCHTST_USE_NF", "").strip()
+            env_flag = os.getenv("PATCHTST_USE_NF", "1").strip()
             self.use_nf_inference = env_flag.lower() in ("1", "true", "yes")
         else:
             self.use_nf_inference = use_nf_inference
@@ -97,6 +105,10 @@ class PatchTSTLoader:
 
     def is_loaded(self) -> bool:
         return self._loaded
+
+    def set_use_nf_inference(self, flag: bool) -> None:
+        """Allow switching inference path at runtime."""
+        self.use_nf_inference = bool(flag)
 
     def _maybe_download_artifacts(self) -> None:
         """Plan A: Auto-download artifacts from GitHub Releases if missing (public repo).
@@ -301,10 +313,6 @@ class PatchTSTLoader:
             if best_params_path.exists():
                 with open(best_params_path, encoding="utf-8") as f:
                     self.hparams = json.load(f)
-            elif MODEL_PATHS["best_params"].exists():
-                # Fallback to default location
-                with open(MODEL_PATHS["best_params"], encoding="utf-8") as f:
-                    self.hparams = json.load(f)
             else:
                 # Fallback to config defaults
                 self.hparams = PATCHTST_PARAMS.copy()
@@ -402,9 +410,6 @@ class PatchTSTLoader:
                 # Load weights (use device-specific path)
                 ckpt_path = self.models_dir / "patchtst.pt"
                 if not ckpt_path.exists():
-                    # Fallback to default location
-                    ckpt_path = MODEL_PATHS["patchtst_ckpt"]
-                if not ckpt_path.exists():
                     raise FileNotFoundError(f"Missing model weights: {ckpt_path}")
                 state = torch.load(ckpt_path, map_location="cpu")
                 # Accept both pure state_dict or checkpoint-like dicts
@@ -424,9 +429,6 @@ class PatchTSTLoader:
             post_model_path = self.models_dir / "post_model.pkl"
             if post_model_path.exists():
                 self.post_model = joblib.load(post_model_path)
-            elif MODEL_PATHS["post_model"].exists():
-                # Fallback to default location
-                self.post_model = joblib.load(MODEL_PATHS["post_model"])
             else:
                 self.post_model = None
 
@@ -434,14 +436,6 @@ class PatchTSTLoader:
             smooth_config_path = self.models_dir / "smooth_config.json"
             if smooth_config_path.exists():
                 with open(smooth_config_path, encoding="utf-8") as f:
-                    sc = json.load(f)
-                self.smooth_cfg = SmoothConfig(
-                    method=sc.get("method", "linear"),
-                    smooth_ratio=float(sc.get("smooth_ratio", 0.2)),
-                )
-            elif MODEL_PATHS["smooth_config"].exists():
-                # Fallback to default location
-                with open(MODEL_PATHS["smooth_config"], encoding="utf-8") as f:
                     sc = json.load(f)
                 self.smooth_cfg = SmoothConfig(
                     method=sc.get("method", "linear"),

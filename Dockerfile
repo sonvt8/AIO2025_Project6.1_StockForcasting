@@ -7,7 +7,8 @@ WORKDIR /app
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONIOENCODING=utf-8
+    PYTHONIOENCODING=utf-8 \
+    PATCHTST_USE_NF=1
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \

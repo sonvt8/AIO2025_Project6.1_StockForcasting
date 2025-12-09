@@ -1,0 +1,80 @@
+# Production Dockerfile with pre-trained artifacts
+# Use this to build images that include trained model artifacts
+# This allows containers to start as 'healthy' immediately without training
+
+# Use Python 3.11 slim image
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONIOENCODING=utf-8 \
+    PATCHTST_USE_NF=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Create necessary directories
+RUN mkdir -p data/raw app/models/artifacts
+
+# Copy pre-trained artifacts (device-specific directories)
+# Requires artifacts to exist locally under app/models/artifacts/{device_type}_{fingerprint}/
+# Example after export: app/models/artifacts/cpu_0e2c799c/
+COPY app/models/artifacts/ app/models/artifacts/
+
+# Optional verification of artifacts during build (if artifacts are present)
+# Enable with: --build-arg RUN_ARTIFACT_EVAL=1
+ARG RUN_ARTIFACT_EVAL=0
+
+# Optional: train/export artifacts during build (CPU) so image is self-contained
+# Enable with: --build-arg RUN_TRAIN=1
+ARG RUN_TRAIN=0
+RUN if [ "$RUN_TRAIN" = "1" ]; then \
+      echo "Training PatchTST artifacts inside image (CPU)..."; \
+      python scripts/run_patchtst_export.py \
+        --train data/raw/FPT_train.csv \
+        --test data/test/FPT_test.csv \
+        --out app/models/artifacts \
+        --deterministic --workspace-config :4096:8; \
+    else \
+      echo "Skipping training during build (RUN_TRAIN=0)"; \
+    fi
+
+RUN if [ "$RUN_ARTIFACT_EVAL" = "1" ] && [ -d "app/models/artifacts" ]; then \
+      ART_DIR=$(find app/models/artifacts -mindepth 1 -maxdepth 1 -type d | head -n 1); \
+      if [ -z "$ART_DIR" ]; then \
+        echo "No artifact subdir found under app/models/artifacts, skipping verify"; \
+      else \
+        echo "Verifying artifacts in $ART_DIR"; \
+        python scripts/verify_artifacts_inference.py \
+          --train data/raw/FPT_train.csv \
+          --test data/test/FPT_test.csv \
+          --horizon 100 \
+          --artifacts "$ART_DIR"; \
+      fi; \
+    else \
+      echo "Skipping artifact verification during build"; \
+    fi
+
+# Expose ports
+# 8000 for FastAPI, 8501 for Streamlit
+EXPOSE 8000 8501
+
+# Default command (can be overridden in docker-compose)
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
