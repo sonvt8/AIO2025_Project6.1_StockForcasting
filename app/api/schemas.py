@@ -90,6 +90,9 @@ class ModelInfoResponse(BaseModel):
     model_type: str | None = None
     features_count: int | None = None
     config: dict | None = None
+    device_type: str | None = None
+    device_name: str | None = None
+    artifact_dir: str | None = None
 
 
 class HealthResponse(BaseModel):
@@ -139,3 +142,32 @@ class RealtimePredictResponse(BaseModel):
             "Approximately ~1500 trading days for better chart depth and clarity."
         ),
     )
+
+
+class MetricTestRequest(BaseModel):
+    """Request for metric testing against ground truth"""
+
+    train_csv_path: str | None = Field(
+        None,
+        description="Path to training CSV (default: data/raw/FPT_train.csv)",
+    )
+    test_csv_path: str | None = Field(
+        None,
+        description="Path to test CSV with ground truth (default: data/test/FPT_test.csv)",
+    )
+    horizon: int = Field(default=100, ge=1, le=100, description="Forecast horizon (1-100)")
+
+
+class MetricTestResponse(BaseModel):
+    """Response for metric testing"""
+
+    device_type: str = Field(..., description="Device type (cuda/mps/cpu)")
+    device_name: str = Field(..., description="Device name")
+    artifact_dir: str = Field(..., description="Artifact directory path")
+    metrics: dict = Field(
+        ...,
+        description="Metrics: mse, bias, rmse, mae, r2, mape",
+    )
+    threshold: float = Field(..., description="MSE threshold for this device")
+    passed: bool = Field(..., description="Whether metrics pass threshold")
+    test_info: dict = Field(..., description="Test information (train/test rows, etc.)")

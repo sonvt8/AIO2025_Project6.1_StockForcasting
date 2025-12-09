@@ -9,6 +9,8 @@ from app.api.schemas import (
     FullPredictRequest,
     FullPredictResponse,
     HealthResponse,
+    MetricTestRequest,
+    MetricTestResponse,
     ModelInfoResponse,
     MultiPredictRequest,
     MultiPredictResponse,
@@ -51,11 +53,20 @@ async def health_check():
 
 @router.get("/api/v1/model/info", response_model=ModelInfoResponse)
 async def get_model_info():
-    """Get model information"""
+    """Get model information including device info"""
     try:
+        from app.utils.device_detector import detect_device
+
         model_service = get_model_service()
         model_service.ensure_models_loaded()
         info = model_service.get_model_info()
+
+        # Add device info
+        device_info = detect_device()
+        info["device_type"] = device_info["device_type"]
+        info["device_name"] = device_info.get("device_name", "unknown")
+        info["artifact_dir"] = str(model_service.model_loader.models_dir)
+
         return ModelInfoResponse(**info)
     except Exception as e:
         raise HTTPException(
@@ -373,4 +384,137 @@ async def predict_realtime(request: RealtimePredictRequest):
         traceback.print_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Prediction error: {str(e)}"
+        ) from e
+
+
+@router.post("/api/v1/test/metrics", response_model=MetricTestResponse)
+async def test_metrics(request: MetricTestRequest):
+    """
+    Test model metrics against ground truth data.
+
+    This endpoint loads train/test data, runs predictions, and compares against
+    ground truth to compute MSE, Bias, RMSE, MAE, R2, and MAPE.
+    Useful for validating that API predictions match expected performance.
+    """
+    try:
+        from pathlib import Path
+
+        import numpy as np
+        from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+        from app.utils.device_detector import detect_device
+
+        model_service = get_model_service()
+        model_service.ensure_models_loaded()
+
+        # Get device info
+        device_info = detect_device()
+        device_type = device_info["device_type"]
+        device_name = device_info.get("device_name", "unknown")
+        artifact_dir = str(model_service.model_loader.models_dir)
+
+        # Load data
+        base_dir = Path(__file__).parent.parent.parent
+        train_csv = (
+            Path(request.train_csv_path)
+            if request.train_csv_path
+            else base_dir / "data" / "raw" / "FPT_train.csv"
+        )
+        test_csv = (
+            Path(request.test_csv_path)
+            if request.test_csv_path
+            else base_dir / "data" / "test" / "FPT_test.csv"
+        )
+
+        if not train_csv.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Training CSV not found: {train_csv}",
+            )
+        if not test_csv.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Test CSV not found: {test_csv}",
+            )
+
+        # Load and prepare data
+        df_train = (
+            pd.read_csv(train_csv, parse_dates=["time"]).sort_values("time").reset_index(drop=True)
+        )
+        df_test_raw = (
+            pd.read_csv(test_csv, parse_dates=["time"]).sort_values("time").reset_index(drop=True)
+        )
+
+        if "symbol" in df_test_raw.columns:
+            df_test = df_test_raw[df_test_raw["symbol"] == "FPT"].copy()
+        else:
+            df_test = df_test_raw.copy()
+
+        last_train_date = df_train["time"].max()
+        df_test = df_test[df_test["time"] > last_train_date].reset_index(drop=True)
+
+        if len(df_test) < request.horizon:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Not enough test data: {len(df_test)} < {request.horizon}",
+            )
+
+        # Get ground truth
+        y_true = df_test.head(request.horizon)["close"].astype("float32").values
+        close_hist = df_train["close"].astype(float).tolist()
+
+        # Predict
+        preds = model_service.model_loader.predict_prices(close_hist, request.horizon)
+        preds = np.asarray(preds, dtype=float).reshape(-1)[: len(y_true)]
+
+        # Compute metrics
+        mse = float(mean_squared_error(y_true, preds))
+        rmse = float(np.sqrt(mse))
+        mae = float(mean_absolute_error(y_true, preds))
+        r2 = float(r2_score(y_true, preds))
+        mape = float(np.mean(np.abs((y_true - preds) / y_true)) * 100)
+        bias = float(np.mean(preds - y_true))
+
+        # Device-specific thresholds
+        mse_thresholds = {
+            "cuda": 18.5,
+            "mps": 50.0,
+            "cpu": 50.0,
+        }
+        threshold = mse_thresholds.get(device_type, 50.0)
+        passed = mse <= threshold
+
+        metrics_dict = {
+            "mse": round(mse, 4),
+            "rmse": round(rmse, 4),
+            "mae": round(mae, 4),
+            "r2": round(r2, 4),
+            "mape": round(mape, 4),
+            "bias": round(bias, 4),
+        }
+
+        test_info = {
+            "train_rows": len(df_train),
+            "test_rows": len(df_test),
+            "horizon": request.horizon,
+            "train_range": f"{df_train['time'].min()} to {df_train['time'].max()}",
+            "test_range": f"{df_test['time'].min()} to {df_test['time'].max()}",
+        }
+
+        return MetricTestResponse(
+            device_type=device_type,
+            device_name=device_name,
+            artifact_dir=artifact_dir,
+            metrics=metrics_dict,
+            threshold=threshold,
+            passed=passed,
+            test_info=test_info,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Metric test error: {str(e)}",
         ) from e

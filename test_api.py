@@ -171,6 +171,80 @@ def test_multiple_requests():
     print()
 
 
+def test_metrics():
+    """Test metrics endpoint against ground truth"""
+    print("=" * 60)
+    print("TEST 5: Metrics Test (Ground Truth Validation)")
+    print("=" * 60)
+
+    payload = {
+        "horizon": 100,
+    }
+
+    print(f"Request payload: {json.dumps(payload, indent=2)}")
+    print("\nSending request...")
+
+    try:
+        response = requests.post(
+            f"{BASE_URL}/api/v1/test/metrics",
+            json=payload,
+            timeout=60,  # May take time for prediction
+        )
+
+        print(f"Status Code: {response.status_code}")
+
+        if response.status_code == 200:
+            result = response.json()
+
+            print("\n" + "-" * 60)
+            print("DEVICE INFO")
+            print("-" * 60)
+            print(f"Device Type: {result['device_type']}")
+            print(f"Device Name: {result['device_name']}")
+            print(f"Artifact Dir: {result['artifact_dir']}")
+
+            print("\n" + "-" * 60)
+            print("METRICS")
+            print("-" * 60)
+            metrics = result["metrics"]
+            print(f"MSE:  {metrics['mse']:.4f}")
+            print(f"RMSE: {metrics['rmse']:.4f}")
+            print(f"MAE:  {metrics['mae']:.4f}")
+            print(f"R²:   {metrics['r2']:.4f}")
+            print(f"MAPE: {metrics['mape']:.4f}%")
+            print(f"Bias: {metrics['bias']:.4f}")
+
+            print("\n" + "-" * 60)
+            print("VALIDATION")
+            print("-" * 60)
+            print(f"Threshold: {result['threshold']:.1f}")
+            print(f"Status: {'✅ PASSED' if result['passed'] else '❌ FAILED'}")
+
+            print("\n" + "-" * 60)
+            print("TEST INFO")
+            print("-" * 60)
+            test_info = result["test_info"]
+            for key, value in test_info.items():
+                print(f"{key}: {value}")
+
+            print("\n✅ Metrics test completed")
+        else:
+            print(f"❌ Error: {response.text}")
+            try:
+                error_detail = response.json()
+                print(f"Error detail: {json.dumps(error_detail, indent=2)}")
+            except Exception:
+                pass
+    except requests.exceptions.Timeout:
+        print("❌ Request timeout. This may take a while...")
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
+
+        traceback.print_exc()
+    print()
+
+
 def main():
     """Run all tests"""
     print("\n" + "=" * 60)
@@ -184,6 +258,7 @@ def main():
     test_model_info()
     test_realtime_prediction()
     test_multiple_requests()
+    test_metrics()
 
     print("=" * 60)
     print("TESTING COMPLETE")
@@ -192,6 +267,7 @@ def main():
     print("  - If 'fetched_new_data' is False, dataset is up to date")
     print("  - If 'fetched_new_data' is True, new data was fetched from internet")
     print("  - Check 'previous_last_date' vs 'latest_date' to see what was fetched")
+    print("  - Metrics test validates API predictions against ground truth")
 
 
 if __name__ == "__main__":

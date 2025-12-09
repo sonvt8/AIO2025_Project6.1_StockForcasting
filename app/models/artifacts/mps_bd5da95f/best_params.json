@@ -1,0 +1,9 @@
+{
+  "input_size": 100,
+  "patch_len": 32,
+  "stride": 4,
+  "learning_rate": 0.001610814898983045,
+  "max_steps": 250,
+  "revin": true,
+  "horizon": 100
+}

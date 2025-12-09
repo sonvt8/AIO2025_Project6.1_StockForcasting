@@ -10,6 +10,7 @@ repos:
     rev: v4.6.0
     hooks:
       - id: check-added-large-files
+        exclude: ^app/models/artifacts/.*\.(pt|pkl)$
       - id: check-json
       - id: check-yaml
       - id: end-of-file-fixer
