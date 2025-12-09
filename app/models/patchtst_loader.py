@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -157,18 +158,37 @@ class PatchTSTLoader:
             print(f"[INFO] Artifacts found for device {device_type}, skipping auto-train.")
             return
 
-        print(f"\n{'='*70}")
-        print(f"[AUTO-TRAIN] Artifacts missing for device: {self.device_info['device_type']}")
-        print(f"[AUTO-TRAIN] Device name: {self.device_info.get('device_name', 'unknown')}")
-        print(f"[AUTO-TRAIN] Artifact directory: {self.models_dir}")
-        print("[AUTO-TRAIN] Starting training pipeline...")
-        print("[AUTO-TRAIN] This may take 5-15 minutes depending on your hardware.")
-        print("[AUTO-TRAIN] Training PatchTST with 250 steps + post-processing...")
-        print(f"{'='*70}\n")
+        # Use sys.__stderr__ to bypass pytest output capture
+        print(f"\n{'='*70}", file=sys.__stderr__, flush=True)
+        print(
+            f"[AUTO-TRAIN] Artifacts missing for device: {self.device_info['device_type']}",
+            file=sys.__stderr__,
+            flush=True,
+        )
+        print(
+            f"[AUTO-TRAIN] Device name: {self.device_info.get('device_name', 'unknown')}",
+            file=sys.__stderr__,
+            flush=True,
+        )
+        print(
+            f"[AUTO-TRAIN] Artifact directory: {self.models_dir}", file=sys.__stderr__, flush=True
+        )
+        print("[AUTO-TRAIN] Starting training pipeline...", file=sys.__stderr__, flush=True)
+        print(
+            "[AUTO-TRAIN] This may take 5-15 minutes depending on your hardware.",
+            file=sys.__stderr__,
+            flush=True,
+        )
+        print(
+            "[AUTO-TRAIN] Training PatchTST with 250 steps + post-processing...",
+            file=sys.__stderr__,
+            flush=True,
+        )
+        print("[AUTO-TRAIN] Progress messages will appear below:", file=sys.__stderr__, flush=True)
+        print(f"{'='*70}\n", file=sys.__stderr__, flush=True)
 
         try:
             import subprocess
-            import sys
 
             script_path = Path(__file__).parent.parent.parent / "scripts" / "run_patchtst_export.py"
             train_csv = Path(__file__).parent.parent.parent / "data" / "raw" / "FPT_train.csv"
@@ -196,26 +216,66 @@ class PatchTSTLoader:
                 "--workspace-config",
                 ":4096:8",
             ]
-            print(f"[AUTO-TRAIN] Command: {' '.join(cmd)}\n")
+            print(f"[AUTO-TRAIN] Command: {' '.join(cmd)}\n", file=sys.__stderr__, flush=True)
 
-            # Run with real-time output (not captured) so user can see progress
-            result = subprocess.run(
+            # Run with real-time output streaming so user can see progress
+            # Use Popen with line buffering to show output immediately, even in pytest
+            # Write to sys.__stderr__ to bypass pytest's output capture
+            process = subprocess.Popen(
                 cmd,
-                stdout=None,  # Print to console
-                stderr=None,  # Print to console
-                timeout=3600,  # 1 hour max
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # Merge stderr into stdout
+                universal_newlines=True,
+                bufsize=1,  # Line buffered
+                encoding="utf-8",
+                errors="replace",  # Handle encoding errors gracefully
             )
 
-            print(f"\n{'='*70}")
+            # Stream output line by line to original stderr (bypasses pytest capture)
+            # This ensures users see progress even when pytest captures stdout/stderr
+            try:
+                for line in iter(process.stdout.readline, ""):
+                    if line:
+                        # Write to original stderr to bypass pytest capture
+                        sys.__stderr__.write(line)
+                        sys.__stderr__.flush()
+                        # Also try stdout for normal runs (may be captured by pytest)
+                        try:
+                            sys.__stdout__.write(line)
+                            sys.__stdout__.flush()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+            # Wait for process to complete
+            returncode = process.wait(timeout=3600)
+            result = type("Result", (), {"returncode": returncode})()
+
+            print(f"\n{'='*70}", file=sys.__stderr__, flush=True)
             if result.returncode == 0:
                 print(
-                    f"[AUTO-TRAIN] ✅ Completed successfully for {self.device_info['device_type']}!"
+                    f"[AUTO-TRAIN] ✅ Completed successfully for {self.device_info['device_type']}!",
+                    file=sys.__stderr__,
+                    flush=True,
                 )
-                print(f"[AUTO-TRAIN] Artifacts saved to: {self.models_dir}")
+                print(
+                    f"[AUTO-TRAIN] Artifacts saved to: {self.models_dir}",
+                    file=sys.__stderr__,
+                    flush=True,
+                )
             else:
-                print(f"[AUTO-TRAIN] ❌ Failed with exit code {result.returncode}")
-                print("[AUTO-TRAIN] Please check the output above for errors.")
-            print(f"{'='*70}\n")
+                print(
+                    f"[AUTO-TRAIN] ❌ Failed with exit code {result.returncode}",
+                    file=sys.__stderr__,
+                    flush=True,
+                )
+                print(
+                    "[AUTO-TRAIN] Please check the output above for errors.",
+                    file=sys.__stderr__,
+                    flush=True,
+                )
+            print(f"{'='*70}\n", file=sys.__stderr__, flush=True)
         except subprocess.TimeoutExpired:
             print("\n[ERROR] Auto-train timed out after 1 hour. Please train manually.")
         except Exception as e:

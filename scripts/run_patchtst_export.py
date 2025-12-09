@@ -32,6 +32,7 @@ import importlib
 import json
 import os
 import platform
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -232,6 +233,17 @@ def run_pipeline(train_df: pd.DataFrame, test_df: pd.DataFrame, horizon: int) ->
     train_nf_full = pd.concat([train_nf, val_nf], ignore_index=True)
 
     # Train PatchTST baseline
+    # Use sys.__stderr__ to bypass pytest output capture
+    print(
+        "[PROGRESS] Step 1/3: Training PatchTST baseline model (250 steps)...",
+        file=sys.__stderr__,
+        flush=True,
+    )
+    print(
+        "[PROGRESS] This may take 3-10 minutes depending on your hardware.",
+        file=sys.__stderr__,
+        flush=True,
+    )
     model_patchtst = PatchTST(
         h=horizon,
         input_size=params["input_size"],
@@ -247,8 +259,14 @@ def run_pipeline(train_df: pd.DataFrame, test_df: pd.DataFrame, horizon: int) ->
     forecast = nf.predict()
     pred_col = [c for c in forecast.columns if c not in ["unique_id", "ds"]][0]
     pred_baseline = forecast[pred_col].values[: len(y_true)].astype("float32")
+    print("[PROGRESS] Step 1/3: Baseline training completed!", file=sys.__stderr__, flush=True)
 
     # Post-processing via TimeSeriesSplit
+    print(
+        "[PROGRESS] Step 2/3: Training post-processing model (3-fold cross-validation)...",
+        file=sys.__stderr__,
+        flush=True,
+    )
     tscv = TimeSeriesSplit(n_splits=3)
     X_post, y_post = [], []
     for train_idx, val_idx in tscv.split(train_nf_full):
@@ -279,6 +297,9 @@ def run_pipeline(train_df: pd.DataFrame, test_df: pd.DataFrame, horizon: int) ->
     y_post = np.array(y_post)
     post_model = LinearRegression().fit(X_post, y_post)
     pred_post = post_model.predict(pred_baseline.reshape(-1, 1))
+    print(
+        "[PROGRESS] Step 2/3: Post-processing training completed!", file=sys.__stderr__, flush=True
+    )
 
     # Smooth Linear 20%
     def smooth_linear_20(baseline: np.ndarray, post: np.ndarray, ratio: float = 0.2) -> np.ndarray:
@@ -372,8 +393,8 @@ def main() -> None:
 
     # Print env snapshot
     snap = env_snapshot()
-    print("\n=== ENV SNAPSHOT ===")
-    print(json.dumps(snap, indent=2, ensure_ascii=False))
+    print("\n=== ENV SNAPSHOT ===", flush=True)
+    print(json.dumps(snap, indent=2, ensure_ascii=False), flush=True)
 
     # Data
     train_csv = Path(args.train)
@@ -381,11 +402,14 @@ def main() -> None:
     df, df_test, _ = load_data(train_csv, test_csv, args.download_if_missing)
 
     print("\n=== DATA REPORT ===")
-    train_range = f"{df['time'].min()}→{df['time'].max()}"
-    print(f"Train rows={len(df)} range={train_range} | " f"Test(after train) rows={len(df_test)}")
+    train_range = f"{df['time'].min()} -> {df['time'].max()}"
+    print(
+        f"Train rows={len(df)} range={train_range} | " f"Test(after train) rows={len(df_test)}",
+        flush=True,
+    )
 
     # Run pipeline
-    print("\n=== TRAIN & PREDICT ===")
+    print("\n=== TRAIN & PREDICT ===", flush=True)
     res = run_pipeline(df, df_test, args.horizon)
 
     # Metrics
@@ -397,8 +421,10 @@ def main() -> None:
     )
 
     # Export
+    print("[PROGRESS] Step 3/3: Exporting artifacts...", file=sys.__stderr__, flush=True)
     out_dir = Path(args.out)
     report = export_artifacts(out_dir, res)
+    print("[PROGRESS] Step 3/3: Artifacts exported successfully!", file=sys.__stderr__, flush=True)
     print("\n=== EXPORTED ARTIFACTS ===")
     print(json.dumps(report, indent=2))
 

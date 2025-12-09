@@ -10,3 +10,9 @@ ignore = ["E203", "E266"]
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
 combine-as-imports = true
+
+[tool.pytest.ini_options]
+# Show output during test execution (useful for seeing auto-train progress)
+# Use -s flag to override: pytest -s (show all output) or pytest -v (verbose but captured)
+addopts = "-v"
+# Note: For real-time progress during auto-train, use: pytest -s tests/test_parity_patchtst.py -v
