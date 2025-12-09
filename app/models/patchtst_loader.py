@@ -254,8 +254,9 @@ class PatchTSTLoader:
 
             print(f"\n{'='*70}", file=sys.__stderr__, flush=True)
             if result.returncode == 0:
+                device_type = self.device_info["device_type"]
                 print(
-                    f"[AUTO-TRAIN] ✅ Completed successfully for {self.device_info['device_type']}!",
+                    f"[AUTO-TRAIN] ✅ Completed successfully for {device_type}!",
                     file=sys.__stderr__,
                     flush=True,
                 )
